@@ -31,8 +31,11 @@ const adapter = new PrismaMariaDb(dbConfig);
 const prisma = new PrismaClient({ adapter });
 
 const app = express();
+const path = require('path');
 app.use(cors());
 app.use(express.json());
+app.use('/images', express.static(path.join(__dirname, '..', 'data/images')));
+
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_change_me';
 
@@ -165,6 +168,7 @@ app.get('/api/dishes/:idMeal', async (req, res) => {
         ingredients: true,
         tags: true,
         thumb_file: true,
+        youtube: true,
         recipes: {
           include: {
             user: { select: { id: true, username: true } },
@@ -240,6 +244,7 @@ app.get('/api/dishes', async (req, res) => {
           ingredients: true,
           tags: true,
           thumb_file: true,
+          youtube: true,
           recipes: {
             include: {
               votes: true,
@@ -300,6 +305,7 @@ app.get('/api/dishes', async (req, res) => {
           ingredients: true,
           tags: true,
           thumb_file: true,
+          youtube: true,
           recipes: {
             include: {
               user: { select: { id: true, username: true } },

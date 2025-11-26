@@ -22,6 +22,7 @@ model Dish {
   ingredients String?    @db.Text
   tags        String?    @db.VarChar(255)
   thumb_file  String?    @db.VarChar(255)
+  youtube String? @db.VarChar(500)
   recipes     Recipe[]
 
   @@map("dishes")

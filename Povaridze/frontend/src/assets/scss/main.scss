@@ -1,0 +1,137 @@
+@use 'sass:color';  // Add this for color.scale()
+@use '_variables' as *;  // Loads vars
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', sans-serif;
+  background: $bg;
+  color: $text;
+  line-height: 1.6;
+}
+
+.container { max-width: 1200px; margin: 0 auto; padding: 0 $spacing-md; }
+
+h1 { text-align: center; color: $primary; margin: $spacing-xl 0; }
+
+.dish-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: $spacing-md;
+  margin: $spacing-lg 0;
+}
+
+.dish-card {
+  background: white;
+  border-radius: $card-radius;
+  box-shadow: $card-shadow;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  cursor: pointer;
+
+  &:hover { transform: translateY(-4px); box-shadow: $card-hover; }
+
+  img { width: 100%; height: 200px; object-fit: cover; }
+
+  .dish-info {
+    padding: $spacing-md;
+    h3 { margin: 0 0 $spacing-xs; color: $primary; font-size: 1.2em; }
+    p { margin: 0 0 $spacing-xs; font-size: 0.9em; color: $text; }
+    .category { color: $secondary; }
+    .area { font-style: italic; }
+  }
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  padding: $spacing-lg 0;
+  background: white;
+  border-bottom: 1px solid $border;
+  justify-content: center;
+
+  input, select { 
+    padding: $spacing-sm; 
+    border: 1px solid $border; 
+    border-radius: calc(#{$card-radius} / 2);  
+    font-size: 1em; 
+    min-width: 150px; 
+  }
+
+  button {
+    background: $primary;
+    color: white;
+    border: none;
+    padding: $spacing-sm $spacing-md;
+    border-radius: calc(#{$card-radius} / 2);  
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover { background: color.scale($primary, $lightness: -10%); }  
+  }
+}
+
+.loading, .no-results { text-align: center; padding: $spacing-xl; font-size: 1.1em; color: $text; }
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: $spacing-md;
+  margin: $spacing-lg 0;
+
+  button {
+    padding: $spacing-sm $spacing-md;
+    border: 1px solid $border;
+    background: white;
+    border-radius: calc(#{$card-radius} / 2);  
+    cursor: pointer;
+
+    &:disabled { opacity: 0.5; cursor: not-allowed; }
+    &:hover:not(:disabled) { background: $secondary; color: white; }
+  }
+
+  span { align-self: center; font-weight: bold; }
+}
+
+/* Dish Detail Styles */
+.dish-detail {
+  .header { text-align: center; margin-bottom: $spacing-lg; }
+  .image { 
+    width: 100%; 
+    max-width: 600px; 
+    height: 400px; 
+    object-fit: cover; 
+    border-radius: $card-radius; 
+    display: block; 
+    margin: 0 auto; 
+  }
+
+  .recipes-grid { display: grid; gap: $spacing-md; margin-top: $spacing-lg; }
+
+  .recipe-card {
+    background: white;
+    padding: $spacing-md;
+    border-radius: $card-radius;
+    box-shadow: $card-shadow;
+
+    h3 { color: $primary; }
+    .votes { display: flex; gap: $spacing-sm; margin: $spacing-sm 0; }
+    button { background: $secondary; color: white; border: none; padding: $spacing-xs $spacing-sm; border-radius: 4px; cursor: pointer; }
+  }
+
+  .comments { margin-top: $spacing-lg; }
+  .comment { background: white; padding: $spacing-md; margin-bottom: $spacing-sm; border-radius: $card-radius; box-shadow: $card-shadow; }
+}
+
+.youtube-section { 
+  margin: $spacing-lg 0; 
+  text-align: center; 
+}
+.youtube-section iframe { 
+  border-radius: $card-radius; 
+  max-width: 100%; 
+  height: 350px; 
+}
