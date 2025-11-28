@@ -23,7 +23,7 @@ import { debounce } from 'lodash-es'
 
 const props = defineProps({
   allDishes: Array,
-  filters: Object  // Explicitly define as Object for safety
+  filters: Object  
 })
 
 const emit = defineEmits(['update'])
