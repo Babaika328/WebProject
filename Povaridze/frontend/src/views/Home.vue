@@ -67,6 +67,8 @@ const updateFilters = (newFilt) => {
   filters.value = newFilt
   page.value = 1
   fetchDishes(newFilt, 1)
+ 
+  router.push({ query: { ...newFilt, page: 1 } })
 }
 
 const goToDetail = (id) => router.push(`/dish/${id}`)
@@ -74,12 +76,26 @@ const goToDetail = (id) => router.push(`/dish/${id}`)
 const goToPage = (p) => {
   if (p >= 1 && p <= pagination.value.pages && p !== '...') {
     fetchDishes(filters.value, p)
+    
+    router.push({ query: { ...route.query, page: p } })
   }
 }
 
-const prevPage = () => page.value > 1 && fetchDishes(filters.value, page.value - 1)
-const nextPage = () => page.value < pagination.value.pages && fetchDishes(filters.value, page.value + 1)
+const prevPage = () => {
+  if (page.value > 1) {
+    const newPage = page.value - 1
+    fetchDishes(filters.value, newPage)
+    router.push({ query: { ...route.query, page: newPage } })
+  }
+}
 
+const nextPage = () => {
+  if (page.value < pagination.value.pages) {
+    const newPage = page.value + 1
+    fetchDishes(filters.value, newPage)
+    router.push({ query: { ...route.query, page: newPage } })
+  }
+}
 
 const getPageNumbers = () => {
   const pages = []
@@ -87,17 +103,14 @@ const getPageNumbers = () => {
   const total = pagination.value.pages
   const delta = 5  
 
-  
   pages.push(1)
   if (current > 1 + delta + 1) pages.push('...')
 
-  
   const leftStart = Math.max(2, current - delta)
   for (let p = leftStart; p <= current; p++) {
     pages.push(p)
   }
 
-  
   const rightEnd = Math.min(total - 1, current + delta)
   for (let p = current + 1; p <= rightEnd; p++) {
     pages.push(p)
@@ -105,7 +118,6 @@ const getPageNumbers = () => {
 
   if (current < total - delta - 1) pages.push('...')
 
-  
   if (total > rightEnd) pages.push(total)
 
   return pages
@@ -118,16 +130,17 @@ watch(() => route.query, (newQuery) => {
     area: newQuery.area || '',
     sortBy: newQuery.sortBy || 'name_asc'
   }
-  if (JSON.stringify(newFilt) !== JSON.stringify(filters.value)) {
+  const newPage = parseInt(newQuery.page) || 1
+  if (JSON.stringify(newFilt) !== JSON.stringify(filters.value) || newPage !== page.value) {
     filters.value = newFilt
-    page.value = parseInt(newQuery.page) || 1
-    fetchDishes(newFilt, page.value)
+    page.value = newPage
+    fetchDishes(newFilt, newPage)
   }
 }, { immediate: true, deep: true })
 
 onMounted(async () => {
-  await fetchDishes({}, 1, true)
-  await fetchDishes()
+  await fetchDishes({}, 1, true) 
+  await fetchDishes(filters.value, page.value)
 })
 </script>
 

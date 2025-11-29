@@ -4,68 +4,62 @@
     <div v-else-if="error" class="no-results">{{ error }}</div>
     <div v-else>
       <h1>{{ recipe.title }}</h1>
-      
-      
+
       <div class="image-wrapper">
         <img :src="recipeImage" :alt="recipe.title" class="recipe-image" @error="handleImageError" />
       </div>
-      
+
       <p><strong>Author:</strong> {{ recipe.user.username }}</p>
+
       <div class="votes">
-        <button @click="vote('UP')" class="vote-up" :disabled="!canInteract">↑ {{ recipe._count?.votes || 0 }}</button>
-        <button @click="vote('DOWN')" class="vote-down" :disabled="!canInteract">↓</button>
+        <button @click="vote('UP')" class="vote-up" :disabled="!canInteract">
+          Up {{ recipe._count?.votes || 0 }}
+        </button>
+        <button @click="vote('DOWN')" class="vote-down" :disabled="!canInteract">Down</button>
       </div>
-      
-      
+
       <div class="recipe-meta">
-        <router-link 
-          v-if="recipe.dish.category" 
-          :to="getFilterLink('category', recipe.dish.category)" 
-          class="meta-badge category"
-        >
+        <router-link v-if="recipe.dish.category" :to="getFilterLink('category', recipe.dish.category)" class="meta-badge">
           <strong>Category:</strong> {{ recipe.dish.category }}
         </router-link>
-        <router-link 
-          v-if="recipe.dish.area" 
-          :to="getFilterLink('area', recipe.dish.area)" 
-          class="meta-badge area"
-        >
+        <router-link v-if="recipe.dish.area" :to="getFilterLink('area', recipe.dish.area)" class="meta-badge">
           <strong>Area:</strong> {{ recipe.dish.area }}
         </router-link>
       </div>
-      
-      
+
       <div class="ingredients-section">
         <h3>Ingredients</h3>
         <ul>
           <li v-for="(ing, i) in parsedIngredients" :key="i">{{ ing }}</li>
         </ul>
       </div>
-      
-      
+
       <div class="instructions-section">
         <h3>Instructions</h3>
         <ol>
           <li v-for="(step, i) in parsedInstructions" :key="i">{{ step }}</li>
         </ol>
       </div>
-      
+
       <div class="comments">
         <h3>Comments ({{ recipe._count?.comments || 0 }})</h3>
         <div v-for="comment in recipe.comments || []" :key="comment.id" class="comment">
           <strong>{{ comment.user.username }}:</strong> {{ comment.text }}
         </div>
-        <textarea v-if="canInteract" placeholder="Add comment..." v-model="newComment"></textarea>
+        <textarea v-if="canInteract" v-model="newComment" placeholder="Write a comment..."></textarea>
         <button v-if="canInteract" @click="addComment">Post Comment</button>
       </div>
-      <router-link :to="`/dish/${recipe.dish.idMeal}`">Back to Dish</router-link>
+
+      <button class="back-button" @click="$router.push(`/dish/${recipe.dish.idMeal}`)">
+        Back to Dish
+      </button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { useRoute } from 'vue-router'
 import axios from 'axios'
 
 const route = useRoute()
@@ -80,81 +74,81 @@ const API_BASE = 'http://localhost:5000/api'
 
 const recipeImage = computed(() => {
   const thumb = recipe.value?.dish?.thumb_file
-  return thumb ? `${API_BASE.replace('/api', '')}/images/${thumb}` : placeholderImg
+  return thumb ? `http://localhost:5000/images/${thumb}` : 'https://via.placeholder.com/600x400/e74c3c/ffffff?text=Delicious'
 })
-const placeholderImg = 'https://via.placeholder.com/600x400/e74c3c/ffffff?text=🍲'
 
-const handleImageError = (e) => { e.target.src = placeholderImg }
-
+const handleImageError = (e) => {
+  e.target.src = 'https://via.placeholder.com/600x400/e74c3c/ffffff?text=Delicious'
+}
 
 const parsedIngredients = computed(() => {
-  const text = recipe.value?.ingredients || ''
-  return text.split(/,|\n/).map(ing => ing.trim()).filter(Boolean)
-})
-
-
-const parsedInstructions = computed(() => {
-  const text = recipe.value?.instructions || ''
-  return text
-    .split(/(?<=[\.\!\?])\s+|\n+/)
-    .map(step => step.trim().replace(/^\d+\.\d+\.\s*|\^\d+\.\s*/, ''))  
+  return (recipe.value?.ingredients || '')
+    .split(',')
+    .map(i => i.trim())
     .filter(Boolean)
 })
 
+const parsedInstructions = computed(() => {
+  const text = recipe.value?.instructions || ''
 
-const getFilterLink = (type, value) => {
-  return { name: 'Home', query: { [type]: value, page: 1 } }  
-}
+  let cleaned = text.replace(/▢/g, '|||SPLIT|||')
+
+  const parts = cleaned.split(/\n\s*\n|\n{3,}|(?=STEP\s+\d+)|(?=step\s+\d+)/i)
+
+  return parts
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(step => {
+      return step
+        .replace(/^STEP\s*\d+\s*/i, '')
+        .replace(/^step\s*\d+\s*/i, '')
+        .replace(/^\d+\.\s*/, '')
+        .replace(/^\d+\)\s*/, '')
+        .replace(/^[:\-–—]\s*/, '')
+        .trim()
+    })
+    .filter(Boolean)
+})
+
+const getFilterLink = (type, value) => ({ name: 'Home', query: { [type]: value, page: 1 } })
 
 const vote = async (type) => {
-  if (!canInteract) return
   try {
-    await axios.post(`${API_BASE}/votes`, { recipeId: route.params.id, type }, { 
-      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } 
+    await axios.post(`${API_BASE}/votes`, { recipeId: recipe.value.id, type }, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
     })
     fetchRecipe()
-  } catch (err) {
-    console.error('Vote error:', err)
-  }
+  } catch (err) { console.error('Vote error:', err) }
 }
 
 const addComment = async () => {
-  if (!newComment.value.trim() || !canInteract) return
+  if (!newComment.value.trim()) return
   try {
-    await axios.post(`${API_BASE}/comments`, { recipeId: route.params.id, text: newComment.value }, { 
-      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } 
+    await axios.post(`${API_BASE}/comments`, { recipeId: recipe.value.id, text: newComment.value }, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
     })
     newComment.value = ''
     fetchRecipe()
-  } catch (err) {
-    console.error('Comment error:', err)
-  }
+  } catch (err) { console.error('Comment error:', err) }
 }
 
 const fetchRecipe = async () => {
+  loading.value = true
   try {
-    let data
     if (isDefault) {
-      const dishId = route.query.dishId
-      if (!dishId) throw new Error('Missing dish ID for default recipe')
-      data = await axios.get(`${API_BASE}/dishes/${dishId}`)
-      const dishData = data.data
-      const defaultRecipe = dishData.recipes[0] || {
-        title: `${dishData.name.trim()} (Default)`,
-        instructions: dishData.instructions || 'No instructions available.',
-        ingredients: dishData.ingredients || 'No ingredients available.',
+      const { data } = await axios.get(`${API_BASE}/dishes/${route.query.dishId}`)
+      const defaultRecipe = data.recipes[0] || {
+        title: `${data.name} (Default)`,
+        instructions: data.instructions || '',
+        ingredients: data.ingredients || '',
         user: { username: 'System' },
         _count: { votes: 0, comments: 0 },
         comments: []
       }
-      recipe.value = {
-        ...defaultRecipe,
-        id: 'default',
-        dish: dishData
-      }
+      recipe.value = { ...defaultRecipe, id: 'default', dish: data }
     } else {
-      data = await axios.get(`${API_BASE}/recipes/${route.params.id}`)
-      recipe.value = data.data
+      const { data } = await axios.get(`${API_BASE}/recipes/${route.params.id}`)
+      recipe.value = data
     }
   } catch (err) {
     error.value = 'Recipe not found'
@@ -167,150 +161,168 @@ onMounted(fetchRecipe)
 </script>
 
 <style scoped lang="scss">
+@use 'sass:color';
 @use '../assets/scss/_variables' as *;
-
-$primary: #e74c3c; 
-$secondary: #27ae60; 
-$light-green: #d4edda; 
-$white: #ffffff;
 
 .image-wrapper {
   text-align: center;
-  margin: $spacing-lg 0;
+  margin: $spacing-xl 0;
 }
 
 .recipe-image {
-  width: 100%;
   max-width: 600px;
-  height: auto;
+  width: 100%;
   border-radius: $card-radius;
-  display: block;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 25px rgba(0,0,0,0.15);
 }
 
-.votes { 
-  display: flex; 
-  gap: 1rem; 
-  margin: 1rem 0; 
-}
-.vote-up { 
-  background: $secondary; 
-  color: $white; 
-  padding: 0.5rem 1rem; 
-  border-radius: 4px; 
-  cursor: pointer; 
-  border: none; 
-  transition: transform 0.3s ease;
+.votes {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  margin: 2rem 0;
 }
 
-.vote-up:hover { 
-  transform: scale(1.1);  
+.vote-up, .vote-down {
+  padding: 0.7rem 1.5rem;
+  border: none;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
 }
 
-.vote-down { 
-  background: $primary; 
-  color: $white; 
-  padding: 0.5rem 1rem; 
-  border-radius: 4px; 
-  cursor: pointer; 
-  border: none; 
-  transition: transform 0.3s ease;
-}
-
-.vote-down:hover { 
-  transform: scale(1.1);  
-}
+.vote-up { background: #27ae60; color: white; }
+.vote-down { background: #e74c3c; color: white; }
+.vote-up:hover { background: #219653; transform: translateY(-3px); }
+.vote-down:hover { background: #c0392b; transform: translateY(-3px); }
 
 .recipe-meta {
   display: flex;
   justify-content: center;
-  gap: $spacing-lg;
-  margin: $spacing-lg 0;
-  
-  .meta-badge {
-    background: $secondary; 
-    color: $white;
-    padding: $spacing-md $spacing-lg;
-    border-radius: 4px; 
-    text-align: center;
-    font-size: 1rem; 
-    font-weight: bold;
-    text-decoration: none;
-    transition: transform 0.3s ease, opacity 0.3s ease;
+  gap: $spacing-xl;
+  margin: $spacing-xl 0;
+}
 
-    &:hover {
-      transform: scale(1.1); 
-      opacity: 0.9;
-    }
+.meta-badge {
+  background: #27ae60;
+  color: white;
+  padding: $spacing-md $spacing-xl;
+  border-radius: 12px;
+  text-align: center;
+  font-weight: bold;
+  text-decoration: none;
+  min-width: 160px;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(39,174,96,0.3);
+}
 
-    strong { 
-      display: block; 
-      font-size: 0.9rem; 
-      margin-bottom: 0.25rem; 
-    }
+.meta-badge:hover {
+  transform: scale(1.1);
+  box-shadow: 0 10px 25px rgba(39,174,96,0.4);
+}
 
-    &.category, &.area {
-      border: none;
-    }
-  }
+.meta-badge strong {
+  display: block;
+  font-size: 0.9rem;
+  opacity: 0.9;
+  margin-bottom: 0.3rem;
 }
 
 .ingredients-section, .instructions-section {
   margin: $spacing-xl 0;
-  h3 { 
-    color: $primary; 
-    border-bottom: 2px solid $secondary; 
-    padding-bottom: $spacing-sm; 
+
+  h3 {
+    color: $primary;
+    border-bottom: 4px solid #27ae60;
+    padding-bottom: 0.5rem;
+    display: inline-block;
+    font-size: 1.9rem;
+    margin-bottom: $spacing-lg;
   }
-  ul, ol {
-    padding-left: $spacing-lg;
-    li { 
-      margin-bottom: $spacing-sm; 
-      line-height: 1.6; 
-      color: #333;
+
+  ul {
+    padding-left: 2rem;
+    li {
+      margin: 1rem 0;
+      font-size: 1.1rem;
+      line-height: 1.7;
     }
   }
-  ol { counter-reset: step-counter; }
-  ol li { counter-increment: step-counter; }
-  ol li:before { 
-    content: counter(step-counter) "."; 
-    color: $secondary; 
-    font-weight: bold; 
-    margin-right: $spacing-sm; 
+
+  ol {
+    padding-left: 2.5rem;
+    margin: 0;
+  }
+
+  ol li {
+    margin: 1.6rem 0;
+    padding-left: 0.5rem;
+    line-height: 1.85;
+    font-size: 1.12rem;
+    color: #2c3e50;
+  }
+
+  ol li::marker {
+    color: #27ae60;
+    font-weight: bold;
+    font-size: 1.4em;
   }
 }
 
-.comments textarea { 
-  width: 100%; 
-  height: 100px; 
-  margin-bottom: 0.5rem; 
-  padding: 0.5rem; 
-  border: 1px solid #e0e0e0; 
-  border-radius: 4px; 
-}
-button { 
-  background: $secondary; 
-  color: $white; 
-  padding: 0.5rem 1rem; 
-  border: none; 
-  border-radius: 4px; 
-  cursor: pointer; 
-  transition: transform 0.3s ease;
+.comments {
+  margin-top: $spacing-xl;
+
+  textarea {
+    width: 100%;
+    height: 120px;
+    padding: 1rem;
+    border: 2px solid #ddd;
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    font-family: inherit;
+  }
+
+  button {
+    background: #27ae60;
+    color: white;
+    padding: 0.7rem 1.5rem;
+    border: none;
+    border-radius: 12px;
+    font-weight: bold;
+    cursor: pointer;
+  }
 }
 
-button:hover {
-  transform: scale(1.1);  
+.comment {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  border-left: 5px solid #27ae60;
 }
 
-button:disabled { 
-  opacity: 0.5; 
-  cursor: not-allowed; 
+.back-button {
+  position: fixed;
+  top: 110px;
+  right: 20px;
+  background: #27ae60;
+  color: white;
+  padding: $spacing-md $spacing-xl;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  z-index: 1000;
+  box-shadow: 0 6px 20px rgba(39,174,96,0.4);
+  transition: all 0.3s ease;
 }
 
-.comment { 
-  background: #f9f9f9; 
-  padding: 0.5rem; 
-  margin: 0.5rem 0; 
-  border-radius: 4px; 
+.back-button:hover {
+  transform: scale(1.1);
+  background: #219653;
+  box-shadow: 0 12px 30px rgba(39,174,96,0.5);
 }
 </style>

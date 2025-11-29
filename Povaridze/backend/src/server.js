@@ -7,6 +7,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Joi = require('joi');
 const urlModule = require('url');
+const sendEmail = require('../utils/sendEmail');   
 
 let dbConfig = {
   host: process.env.DB_HOST || 'localhost',
@@ -576,6 +577,41 @@ app.delete('/api/users/:id', authMiddleware, adminMiddleware, async (req, res) =
     await prisma.user.delete({ where: { id: parseInt(id) } });
     res.status(204).send();
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// TEST EMAIL — sends FROM ukrastuk@gmail.com → TO robotpilesos111@gmail.com
+app.get('/test-email', async (req, res) => {
+  try {
+    await sendEmail(
+      'robotpilesos111@gmail.com',        // to
+      'Povaridze Test Email – It Works!',
+      `
+      <div style="font-family: Arial, sans-serif; text-align: center; padding: 40px; background: #f9f9f9; max-width: 600px; margin: auto; border-radius: 16px;">
+        <img src="https://i.imgur.com/2EnxFDX.jpeg" alt="Povaridze Logo" width="140" style="margin-bottom: 20px;" />
+        <h1 style="color: #e74c3c; margin: 0;">It works perfectly!</h1>
+        <p style="font-size: 18px; color: #333; margin: 20px 0;">
+          Your email system is 100% configured and ready.
+        </p>
+        <p style="font-size: 16px; color: #27ae60; font-weight: bold;">
+          Welcome emails, password resets, notifications — everything will work now!
+        </p>
+        <hr style="border: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #777; font-size: 14px;">
+          Sent from: ukrastuk@gmail.com<br>
+          Your Povaridze backend is alive and awesome
+        </p>
+      </div>
+      `
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Email sent successfully! Check robotpilesos111@gmail.com (including Spam/Junk)' 
+    });
+  } catch (err) {
+    console.error('Email failed:', err);
     res.status(500).json({ error: err.message });
   }
 });
