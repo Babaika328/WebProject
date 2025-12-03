@@ -108,26 +108,129 @@ const canAccessResource = async (req, res, resourceType, resourceId) => {
   return true;
 };
 
+const verificationCodes = new Map();
+
+const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+app.post('/api/auth/send-code', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+  const code = generateCode();
+  const expires = Date.now() + 5 * 60 * 1000; 
+
+  verificationCodes.set(email.toLowerCase(), { code, expires });
+
+  const html = `
+  <div style="font-family: Arial, sans-serif; text-align: center; padding: 40px; background: #f5f7fa; max-width: 520px; margin: auto; border-radius: 16px;">
+    <img src="https://i.imgur.com/2EnxFDX.jpeg" alt="Povaridze Logo" width="120" style="margin-bottom: 20px;" />
+
+    <h1 style="color: #e74c3c; margin-bottom: 10px;">Email Verification</h1>
+
+    <p style="font-size: 16px; color: #333;">
+      Please use the verification code below to complete your authentication.
+    </p>
+
+    <div style="margin: 25px 0;">
+      <span style="font-size: 42px; letter-spacing: 10px; background: #ffffff; padding: 20px 35px; border-radius: 12px; display: inline-block; color: #27ae60; font-weight: bold; border: 1px solid #e0e0e0;">
+        ${code}
+      </span>
+    </div>
+
+    <p style="font-size: 14px; color: #666;">The code is valid for <strong>5 minutes</strong>.</p>
+
+    <p style="color: #999; font-size: 13px; margin-top: 30px;">
+      If you did not request this verification code, simply ignore this message.
+    </p>
+  </div>
+  `;
+
+  try {
+    await sendEmail(email, 'Your Povaridze Verification Code', html);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send verification code.' });
+  }
+});
+
+app.post('/api/auth/verify-code', (req, res) => {
+  const { email, code } = req.body;
+
+  const stored = verificationCodes.get(email.toLowerCase());
+  if (!stored || Date.now() > stored.expires || stored.code !== code) {
+    return res.status(400).json({ error: 'Invalid or expired verification code.' });
+  }
+
+  verificationCodes.delete(email.toLowerCase());
+  res.json({ success: true });
+});
 
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { error } = registerSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
-    const { username, email, password } = req.body;
+
+    let { username, email, password } = req.body;
+
+    username = username.trim().toLowerCase();
+    const usernameRegex = /^[a-z0-9_-]{3,20}$/;
+    if (!usernameRegex.test(username)) {
+      return res.status(400).json({ 
+        error: 'Username must be 3–20 characters and contain only lowercase letters, numbers, _ or -' 
+      });
+    }
+
     const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) return res.status(400).json({ error: 'User with this email already exists.' });
+
     const existingUsername = await prisma.user.findUnique({ where: { username } });
-    if (existingUser) return res.status(400).json({ error: 'User already exists' });
-    if (existingUsername) return res.status(400).json({ error: 'Username already taken' });
+    if (existingUsername) return res.status(400).json({ error: 'Username is already taken.' });
+
     const hashedPassword = await bcrypt.hash(password, 10);
+
     const user = await prisma.user.create({
-      data: { username, email, password: hashedPassword }
+      data: { 
+        username, 
+        email, 
+        password: hashedPassword 
+      }
     });
+
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ token, user: { id: user.id, username: user.username, email: user.email, role: user.role } });
+
+    const welcomeHtml = `
+      <div style="font-family: Arial, sans-serif; text-align: center; padding: 40px; background: #f5f7fa; max-width: 600px; margin: auto; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+        <img src="https://i.imgur.com/2EnxFDX.jpeg" alt="Povaridze Logo" width="140" style="margin-bottom: 20px;" />
+        <h1 style="color: #e74c3c; margin-bottom: 10px;">Welcome to Povaridze, ${user.username}!</h1>
+        <p style="font-size: 17px; color: #333;">
+          Your account has been successfully created.
+        </p>
+        <p style="font-size: 16px; color: #27ae60; font-weight: bold; margin-top: 20px;">
+          Start exploring our curated collection of recipes and discover your next favorite dish!
+        </p>
+        <p style="font-size: 13px; color: #888; margin-top: 30px;">
+          Thank you for joining Povaridze — we are excited to have you with us.
+        </p>
+      </div>
+    `;
+
+    await sendEmail(email, 'Welcome to Povaridze!', welcomeHtml);
+
+    res.status(201).json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role
+      }
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Registration error:', err);
+    res.status(500).json({ error: 'Registration failed' });
   }
 });
+
 
 
 app.post('/api/auth/login', async (req, res) => {
@@ -577,41 +680,6 @@ app.delete('/api/users/:id', authMiddleware, adminMiddleware, async (req, res) =
     await prisma.user.delete({ where: { id: parseInt(id) } });
     res.status(204).send();
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// TEST EMAIL — sends FROM ukrastuk@gmail.com → TO robotpilesos111@gmail.com
-app.get('/test-email', async (req, res) => {
-  try {
-    await sendEmail(
-      'robotpilesos111@gmail.com',        // to
-      'Povaridze Test Email – It Works!',
-      `
-      <div style="font-family: Arial, sans-serif; text-align: center; padding: 40px; background: #f9f9f9; max-width: 600px; margin: auto; border-radius: 16px;">
-        <img src="https://i.imgur.com/2EnxFDX.jpeg" alt="Povaridze Logo" width="140" style="margin-bottom: 20px;" />
-        <h1 style="color: #e74c3c; margin: 0;">It works perfectly!</h1>
-        <p style="font-size: 18px; color: #333; margin: 20px 0;">
-          Your email system is 100% configured and ready.
-        </p>
-        <p style="font-size: 16px; color: #27ae60; font-weight: bold;">
-          Welcome emails, password resets, notifications — everything will work now!
-        </p>
-        <hr style="border: 1px solid #eee; margin: 30px 0;">
-        <p style="color: #777; font-size: 14px;">
-          Sent from: ukrastuk@gmail.com<br>
-          Your Povaridze backend is alive and awesome
-        </p>
-      </div>
-      `
-    );
-
-    res.json({ 
-      success: true, 
-      message: 'Email sent successfully! Check robotpilesos111@gmail.com (including Spam/Junk)' 
-    });
-  } catch (err) {
-    console.error('Email failed:', err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -1,53 +1,72 @@
 <template>
-  <div class="container recipe-detail">
-    <div v-if="loading" class="loading">Loading...</div>
-    <div v-else-if="error" class="no-results">{{ error }}</div>
+  <div class="container recipe-detail py-12">
+    <div v-if="loading" class="text-center py-20 text-2xl">Loading...</div>
+    <div v-else-if="error" class="text-center text-red-600 py-20">{{ error }}</div>
     <div v-else>
-      <h1>{{ recipe.title }}</h1>
+      <h1 class="text-5xl md:text-6xl font-bold text-center text-primary mb-8">
+        {{ recipe.title }}
+      </h1>
+
+      <div class="flex justify-center gap-6 mb-12 flex-wrap">
+        <router-link 
+          v-if="recipe.dish.category" 
+          :to="getFilterLink('category', recipe.dish.category)" 
+          class="tag-btn category"
+        >
+          {{ recipe.dish.category }}
+        </router-link>
+        <router-link 
+          v-if="recipe.dish.area" 
+          :to="getFilterLink('area', recipe.dish.area)" 
+          class="tag-btn area"
+        >
+          {{ recipe.dish.area }}
+        </router-link>
+      </div>
 
       <div class="image-wrapper">
-        <img :src="recipeImage" :alt="recipe.title" class="recipe-image" @error="handleImageError" />
+        <img 
+          :src="recipeImage" 
+          :alt="recipe.title" 
+          class="recipe-image" 
+          @error="handleImageError" 
+        />
       </div>
 
-      <p><strong>Author:</strong> {{ recipe.user.username }}</p>
+      <p class="text-center text-xl text-gray-700 mt-6">
+        <strong>Author:</strong> {{ recipe.user.username }}
+      </p>
 
-      <div class="votes">
-        <button @click="vote('UP')" class="vote-up" :disabled="!canInteract">
+      <div class="votes flex justify-center gap-8 my-10">
+        <button @click="vote('UP')" class="vote-btn up" :disabled="!canInteract">
           Up {{ recipe._count?.votes || 0 }}
         </button>
-        <button @click="vote('DOWN')" class="vote-down" :disabled="!canInteract">Down</button>
-      </div>
-
-      <div class="recipe-meta">
-        <router-link v-if="recipe.dish.category" :to="getFilterLink('category', recipe.dish.category)" class="meta-badge">
-          <strong>Category:</strong> {{ recipe.dish.category }}
-        </router-link>
-        <router-link v-if="recipe.dish.area" :to="getFilterLink('area', recipe.dish.area)" class="meta-badge">
-          <strong>Area:</strong> {{ recipe.dish.area }}
-        </router-link>
+        <button @click="vote('DOWN')" class="vote-btn down" :disabled="!canInteract">
+          Down
+        </button>
       </div>
 
       <div class="ingredients-section">
-        <h3>Ingredients</h3>
-        <ul>
+        <h3 class="section-title">Ingredients</h3>
+        <ul class="list">
           <li v-for="(ing, i) in parsedIngredients" :key="i">{{ ing }}</li>
         </ul>
       </div>
 
       <div class="instructions-section">
-        <h3>Instructions</h3>
-        <ol>
+        <h3 class="section-title">Instructions</h3>
+        <ol class="list">
           <li v-for="(step, i) in parsedInstructions" :key="i">{{ step }}</li>
         </ol>
       </div>
 
-      <div class="comments">
-        <h3>Comments ({{ recipe._count?.comments || 0 }})</h3>
+      <div class="comments-section">
+        <h3 class="section-title">Comments ({{ recipe._count?.comments || 0 }})</h3>
         <div v-for="comment in recipe.comments || []" :key="comment.id" class="comment">
           <strong>{{ comment.user.username }}:</strong> {{ comment.text }}
         </div>
-        <textarea v-if="canInteract" v-model="newComment" placeholder="Write a comment..."></textarea>
-        <button v-if="canInteract" @click="addComment">Post Comment</button>
+        <textarea v-if="canInteract" v-model="newComment" placeholder="Add a comment..." class="comment-input"></textarea>
+        <button v-if="canInteract" @click="addComment" class="submit-btn">Post Comment</button>
       </div>
 
       <button class="back-button" @click="$router.push(`/dish/${recipe.dish.idMeal}`)">
@@ -74,39 +93,24 @@ const API_BASE = 'http://localhost:5000/api'
 
 const recipeImage = computed(() => {
   const thumb = recipe.value?.dish?.thumb_file
-  return thumb ? `http://localhost:5000/images/${thumb}` : 'https://via.placeholder.com/600x400/e74c3c/ffffff?text=Delicious'
+  return thumb ? `http://localhost:5000/images/${thumb}` : 'https://via.placeholder.com/800x600/e74c3c/ffffff?text=Delicious'
 })
 
 const handleImageError = (e) => {
-  e.target.src = 'https://via.placeholder.com/600x400/e74c3c/ffffff?text=Delicious'
+  e.target.src = 'https://via.placeholder.com/800x600/e74c3c/ffffff?text=Delicious'
 }
 
 const parsedIngredients = computed(() => {
-  return (recipe.value?.ingredients || '')
-    .split(',')
-    .map(i => i.trim())
-    .filter(Boolean)
+  return (recipe.value?.ingredients || '').split(',').map(i => i.trim()).filter(Boolean)
 })
 
 const parsedInstructions = computed(() => {
   const text = recipe.value?.instructions || ''
-
-  let cleaned = text.replace(/▢/g, '|||SPLIT|||')
-
-  const parts = cleaned.split(/\n\s*\n|\n{3,}|(?=STEP\s+\d+)|(?=step\s+\d+)/i)
-
-  return parts
+  return text
+    .split(/\n\s*▢\s*\n|\n\n/)
     .map(s => s.trim())
     .filter(Boolean)
-    .map(step => {
-      return step
-        .replace(/^STEP\s*\d+\s*/i, '')
-        .replace(/^step\s*\d+\s*/i, '')
-        .replace(/^\d+\.\s*/, '')
-        .replace(/^\d+\)\s*/, '')
-        .replace(/^[:\-–—]\s*/, '')
-        .trim()
-    })
+    .map(step => step.replace(/^STEP\s*\d+[:.]?\s*/i, '').trim())
     .filter(Boolean)
 })
 
@@ -118,7 +122,7 @@ const vote = async (type) => {
       headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
     })
     fetchRecipe()
-  } catch (err) { console.error('Vote error:', err) }
+  } catch (err) { console.error(err) }
 }
 
 const addComment = async () => {
@@ -129,7 +133,7 @@ const addComment = async () => {
     })
     newComment.value = ''
     fetchRecipe()
-  } catch (err) { console.error('Comment error:', err) }
+  } catch (err) { console.error(err) }
 }
 
 const fetchRecipe = async () => {
@@ -137,14 +141,7 @@ const fetchRecipe = async () => {
   try {
     if (isDefault) {
       const { data } = await axios.get(`${API_BASE}/dishes/${route.query.dishId}`)
-      const defaultRecipe = data.recipes[0] || {
-        title: `${data.name} (Default)`,
-        instructions: data.instructions || '',
-        ingredients: data.ingredients || '',
-        user: { username: 'System' },
-        _count: { votes: 0, comments: 0 },
-        comments: []
-      }
+      const defaultRecipe = data.recipes[0] || { title: `${data.name} (Default)`, user: { username: 'System' }, _count: { votes: 0, comments: 0 } }
       recipe.value = { ...defaultRecipe, id: 'default', dish: data }
     } else {
       const { data } = await axios.get(`${API_BASE}/recipes/${route.params.id}`)
@@ -160,169 +157,39 @@ const fetchRecipe = async () => {
 onMounted(fetchRecipe)
 </script>
 
-<style scoped lang="scss">
-@use 'sass:color';
-@use '../assets/scss/_variables' as *;
-
-.image-wrapper {
-  text-align: center;
-  margin: $spacing-xl 0;
+<style scoped>
+.tag-btn {
+  @apply inline-block px-10 py-5 rounded-2xl bg-green-600 text-white font-bold text-lg shadow-2xl 
+         hover:bg-green-700 hover:scale-110 transition-all duration-300;
 }
 
+.image-wrapper { @apply text-center my-8; }
 .recipe-image {
-  max-width: 600px;
-  width: 100%;
-  border-radius: $card-radius;
-  box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+  @apply max-w-xl w-full rounded-3xl shadow-2xl mx-auto my-10;
 }
 
-.votes {
-  display: flex;
-  gap: 1.5rem;
-  justify-content: center;
-  margin: 2rem 0;
+.votes { @apply flex justify-center gap-6 my-8; }
+.vote-btn {
+  @apply px-8 py-3 rounded-full font-bold text-white text-base shadow-lg hover:scale-105 transition;
+}
+.up { @apply bg-green-600 hover:bg-green-700; }
+.down { @apply bg-red-600 hover:bg-red-700; }
+
+.section-title {
+  @apply text-2xl md:text-3xl font-bold text-primary text-center my-10 border-b-4 border-green-600 inline-block pb-2;
 }
 
-.vote-up, .vote-down {
-  padding: 0.7rem 1.5rem;
-  border: none;
-  border-radius: 12px;
-  font-weight: bold;
-  font-size: 1.1rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
+.list {
+  @apply max-w-3xl mx-auto pl-8 text-base md:text-lg leading-8 space-y-3;
 }
+.list li::marker { @apply text-green-600 font-bold text-xl; }
 
-.vote-up { background: #27ae60; color: white; }
-.vote-down { background: #e74c3c; color: white; }
-.vote-up:hover { background: #219653; transform: translateY(-3px); }
-.vote-down:hover { background: #c0392b; transform: translateY(-3px); }
-
-.recipe-meta {
-  display: flex;
-  justify-content: center;
-  gap: $spacing-xl;
-  margin: $spacing-xl 0;
-}
-
-.meta-badge {
-  background: #27ae60;
-  color: white;
-  padding: $spacing-md $spacing-xl;
-  border-radius: 12px;
-  text-align: center;
-  font-weight: bold;
-  text-decoration: none;
-  min-width: 160px;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(39,174,96,0.3);
-}
-
-.meta-badge:hover {
-  transform: scale(1.1);
-  box-shadow: 0 10px 25px rgba(39,174,96,0.4);
-}
-
-.meta-badge strong {
-  display: block;
-  font-size: 0.9rem;
-  opacity: 0.9;
-  margin-bottom: 0.3rem;
-}
-
-.ingredients-section, .instructions-section {
-  margin: $spacing-xl 0;
-
-  h3 {
-    color: $primary;
-    border-bottom: 4px solid #27ae60;
-    padding-bottom: 0.5rem;
-    display: inline-block;
-    font-size: 1.9rem;
-    margin-bottom: $spacing-lg;
-  }
-
-  ul {
-    padding-left: 2rem;
-    li {
-      margin: 1rem 0;
-      font-size: 1.1rem;
-      line-height: 1.7;
-    }
-  }
-
-  ol {
-    padding-left: 2.5rem;
-    margin: 0;
-  }
-
-  ol li {
-    margin: 1.6rem 0;
-    padding-left: 0.5rem;
-    line-height: 1.85;
-    font-size: 1.12rem;
-    color: #2c3e50;
-  }
-
-  ol li::marker {
-    color: #27ae60;
-    font-weight: bold;
-    font-size: 1.4em;
-  }
-}
-
-.comments {
-  margin-top: $spacing-xl;
-
-  textarea {
-    width: 100%;
-    height: 120px;
-    padding: 1rem;
-    border: 2px solid #ddd;
-    border-radius: 12px;
-    margin-bottom: 1rem;
-    font-family: inherit;
-  }
-
-  button {
-    background: #27ae60;
-    color: white;
-    padding: 0.7rem 1.5rem;
-    border: none;
-    border-radius: 12px;
-    font-weight: bold;
-    cursor: pointer;
-  }
-}
-
-.comment {
-  background: #f8f9fa;
-  padding: 1rem;
-  border-radius: 12px;
-  margin-bottom: 1rem;
-  border-left: 5px solid #27ae60;
-}
+.comments-section { @apply max-w-3xl mx-auto my-12; }
+.comment { @apply bg-gray-50 p-4 rounded-xl mb-4 shadow-sm border-l-4 border-green-600; }
+.comment-input { @apply w-full p-4 rounded-xl border border-gray-300 focus:border-green-600 outline-none; }
+.submit-btn { @apply bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-xl mt-3 shadow-lg hover:shadow-xl transition; }
 
 .back-button {
-  position: fixed;
-  top: 110px;
-  right: 20px;
-  background: #27ae60;
-  color: white;
-  padding: $spacing-md $spacing-xl;
-  border: none;
-  border-radius: 12px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  cursor: pointer;
-  z-index: 1000;
-  box-shadow: 0 6px 20px rgba(39,174,96,0.4);
-  transition: all 0.3s ease;
-}
-
-.back-button:hover {
-  transform: scale(1.1);
-  background: #219653;
-  box-shadow: 0 12px 30px rgba(39,174,96,0.5);
+  @apply fixed top-36 right-6 bg-green-600 text-white px-6 py-3 rounded-xl font-bold text-base shadow-2xl hover:scale-110 hover:bg-green-700 transition-all z-50;
 }
 </style>
