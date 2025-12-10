@@ -33,6 +33,7 @@ model User {
   username String   @unique @db.VarChar(50)  
   email    String   @unique @db.VarChar(255)
   password String   @db.VarChar(255)
+  profilePicture  String?  @db.VarChar(255)
   role     Role     @default(USER)
   recipes  Recipe[]
   votes    Vote[]

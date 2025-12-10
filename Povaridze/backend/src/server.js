@@ -7,7 +7,9 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Joi = require('joi');
 const urlModule = require('url');
-const sendEmail = require('../utils/sendEmail');   
+const path = require('path');
+const fs = require('fs').promises;
+const sendEmail = require('../utils/sendEmail');
 
 let dbConfig = {
   host: process.env.DB_HOST || 'localhost',
@@ -32,21 +34,38 @@ const adapter = new PrismaMariaDb(dbConfig);
 const prisma = new PrismaClient({ adapter });
 
 const app = express();
-const path = require('path');
 app.use(cors());
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, '..', 'data/images')));
-
+app.use('/avatars', express.static(path.join(__dirname, '..', 'data/avatars')));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_change_me';
 
+const multer = require('multer');
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, path.join(__dirname, '..', 'data/avatars')),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `user-${req.user.id}-${Date.now()}${ext}`);
+  }
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const types = /jpeg|jpg|png|gif|webp/;
+    const ext = types.test(path.extname(file.originalname).toLowerCase());
+    const mime = types.test(file.mimetype);
+    if (ext && mime) cb(null, true);
+    else cb(new Error('Invalid image type'));
+  }
+});
 
 const registerSchema = Joi.object({
   username: Joi.string().alphanum().min(3).max(50).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(6).required()
 });
-
 
 const loginSchema = Joi.object({
   credential: Joi.alternatives().try(
@@ -63,7 +82,6 @@ const recipeSchema = Joi.object({
   ingredients: Joi.string().optional()
 });
 
-
 const updateRecipeSchema = recipeSchema.fork(['dishId'], schema => schema.optional());
 
 const voteSchema = Joi.object({
@@ -76,6 +94,13 @@ const commentSchema = Joi.object({
   text: Joi.string().min(1).required()
 });
 
+const createToken = (user) => {
+  return jwt.sign(
+    { id: user.id, username: user.username, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+};
 
 const authMiddleware = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -89,13 +114,11 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-
 const adminMiddleware = async (req, res, next) => {
   const user = await prisma.user.findUnique({ where: { id: req.user.id } });
   if (user.role !== 'ADMIN') return res.status(403).json({ error: 'Admin access required.' });
   next();
 };
-
 
 const canAccessResource = async (req, res, resourceType, resourceId) => {
   const user = await prisma.user.findUnique({ where: { id: req.user.id } });
@@ -109,7 +132,6 @@ const canAccessResource = async (req, res, resourceType, resourceId) => {
 };
 
 const verificationCodes = new Map();
-
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 app.post('/api/auth/send-code', async (req, res) => {
@@ -117,31 +139,23 @@ app.post('/api/auth/send-code', async (req, res) => {
   if (!email) return res.status(400).json({ error: 'Email is required.' });
 
   const code = generateCode();
-  const expires = Date.now() + 5 * 60 * 1000; 
+  const expires = Date.now() + 5 * 60 * 1000;
 
   verificationCodes.set(email.toLowerCase(), { code, expires });
 
   const html = `
   <div style="font-family: Arial, sans-serif; text-align: center; padding: 40px; background: #f5f7fa; max-width: 520px; margin: auto; border-radius: 16px;">
     <img src="https://i.imgur.com/2EnxFDX.jpeg" alt="Povaridze Logo" width="120" style="margin-bottom: 20px;" />
-
     <h1 style="color: #e74c3c; margin-bottom: 10px;">Email Verification</h1>
-
     <p style="font-size: 16px; color: #333;">
       Please use the verification code below to complete your authentication.
     </p>
-
     <div style="margin: 25px 0;">
       <span style="font-size: 42px; letter-spacing: 10px; background: #ffffff; padding: 20px 35px; border-radius: 12px; display: inline-block; color: #27ae60; font-weight: bold; border: 1px solid #e0e0e0;">
         ${code}
       </span>
     </div>
-
     <p style="font-size: 14px; color: #666;">The code is valid for <strong>5 minutes</strong>.</p>
-
-    <p style="color: #999; font-size: 13px; margin-top: 30px;">
-      If you did not request this verification code, simply ignore this message.
-    </p>
   </div>
   `;
 
@@ -155,12 +169,10 @@ app.post('/api/auth/send-code', async (req, res) => {
 
 app.post('/api/auth/verify-code', (req, res) => {
   const { email, code } = req.body;
-
   const stored = verificationCodes.get(email.toLowerCase());
   if (!stored || Date.now() > stored.expires || stored.code !== code) {
     return res.status(400).json({ error: 'Invalid or expired verification code.' });
   }
-
   verificationCodes.delete(email.toLowerCase());
   res.json({ success: true });
 });
@@ -171,7 +183,6 @@ app.post('/api/auth/register', async (req, res) => {
     if (error) return res.status(400).json({ error: error.details[0].message });
 
     let { username, email, password } = req.body;
-
     username = username.trim().toLowerCase();
     const usernameRegex = /^[a-z0-9_-]{3,20}$/;
     if (!usernameRegex.test(username)) {
@@ -189,14 +200,10 @@ app.post('/api/auth/register', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
-      data: { 
-        username, 
-        email, 
-        password: hashedPassword 
-      }
+      data: { username, email, password: hashedPassword }
     });
 
-    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    const token = createToken(user);
 
     const welcomeHtml = `
       <div style="font-family: Arial, sans-serif; text-align: center; padding: 40px; background: #f5f7fa; max-width: 600px; margin: auto; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
@@ -208,30 +215,20 @@ app.post('/api/auth/register', async (req, res) => {
         <p style="font-size: 16px; color: #27ae60; font-weight: bold; margin-top: 20px;">
           Start exploring our curated collection of recipes and discover your next favorite dish!
         </p>
-        <p style="font-size: 13px; color: #888; margin-top: 30px;">
-          Thank you for joining Povaridze — we are excited to have you with us.
-        </p>
       </div>
     `;
 
-    await sendEmail(email, 'Welcome to Povaridze!', welcomeHtml);
+    await sendEmail(email, 'Welcome to Povaridze!', welcomeHtml).catch(console.error);
 
     res.status(201).json({
       token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role
-      }
+      user: { id: user.id, username: user.username, email: user.email, role: user.role }
     });
   } catch (err) {
     console.error('Registration error:', err);
     res.status(500).json({ error: 'Registration failed' });
   }
 });
-
-
 
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -241,20 +238,137 @@ app.post('/api/auth/login', async (req, res) => {
     let user;
     const emailValidation = Joi.string().email().validate(credential);
     if (emailValidation.error) {
-      
-      user = await prisma.user.findUnique({ where: { username: credential } });
+      user = await prisma.user.findUnique({ where: { username: credential.toLowerCase() } });
     } else {
-      
       user = await prisma.user.findUnique({ where: { email: credential } });
     }
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(400).json({ error: 'Invalid credentials' });
     }
-    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    const token = createToken(user);
     res.json({ token, user: { id: user.id, username: user.username, email: user.email, role: user.role } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+
+app.get('/api/me', authMiddleware, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, username: true, email: true, profilePicture: true, role: true }
+    });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/me', authMiddleware, upload.single('profilePicture'), async (req, res) => {
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { username: true, email: true, profilePicture: true, role: true }
+    });
+
+    const updateData = {};
+
+    if (req.body.username) {
+      const newUsername = req.body.username.trim().toLowerCase();
+      if (newUsername !== current.username) {
+        const exists = await prisma.user.findUnique({ where: { username: newUsername } });
+        if (exists) return res.status(400).json({ error: 'Username taken' });
+        updateData.username = newUsername;
+      }
+    }
+
+    if (req.body.email && req.body.email !== current.email) {
+      if (current.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Email change requires verification' });
+      }
+      updateData.email = req.body.email;
+    }
+
+    if (req.file) {
+      if (current.profilePicture) {
+        const oldPath = path.join(__dirname, '..', 'data/avatars', current.profilePicture);
+        await fs.unlink(oldPath).catch(() => {});
+      }
+      updateData.profilePicture = req.file.filename;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.json({ id: req.user.id, ...current });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data: updateData,
+      select: { id: true, username: true, email: true, profilePicture: true, role: true }
+    });
+
+    if (updateData.username) {
+      const newToken = createToken(updated);
+      return res.json({ user: updated, token: newToken });
+    }
+
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Update failed' });
+  }
+});
+
+app.post('/api/me/change-password', authMiddleware, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  const match = await bcrypt.compare(currentPassword, user.password);
+  if (!match) return res.status(400).json({ error: 'Current password incorrect' });
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { password: hashed }
+  });
+
+  res.json({ message: 'Password changed' });
+});
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const code = generateCode();
+  const expires = Date.now() + 10 * 60 * 1000;
+  verificationCodes.set(email.toLowerCase(), { code, expires, type: 'reset' });
+
+  await sendEmail(email, 'Password Reset Code', `
+    <h2>Password Reset</h2>
+    <p>Your code: <strong style="font-size: 32px; letter-spacing: 8px;">${code}</strong></p>
+    <p>Valid for 10 minutes.</p>
+  `);
+
+  res.json({ message: 'Code sent' });
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  const stored = verificationCodes.get(email.toLowerCase());
+
+  if (!stored || stored.type !== 'reset' || stored.code !== code || Date.now() > stored.expires) {
+    return res.status(400).json({ error: 'Invalid or expired code' });
+  }
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { email },
+    data: { password: hashed }
+  });
+
+  verificationCodes.delete(email.toLowerCase());
+  res.json({ message: 'Password reset successful' });
 });
 
 
@@ -284,7 +398,6 @@ app.get('/api/dishes/:idMeal', async (req, res) => {
     });
     if (!dish) return res.status(404).json({ error: 'Dish not found' });
 
-    
     let recipes = dish.recipes;
     if (recipes.length === 0) {
       const defaultRecipe = {
@@ -299,7 +412,6 @@ app.get('/api/dishes/:idMeal', async (req, res) => {
       recipes = [defaultRecipe];
     }
 
-    
     const { instructions, ingredients, ...cleanDish } = dish;
     res.json({ ...cleanDish, recipes });
   } catch (err) {
@@ -307,23 +419,19 @@ app.get('/api/dishes/:idMeal', async (req, res) => {
   }
 });
 
-
 app.get('/api/dishes', async (req, res) => {
   try {
     const { category, area, tags, limit = 20, page = 1, search, sortBy = 'name_asc' } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const where = {};
 
-    
     if (category) where.category = category;
     if (area) where.area = area;
 
-    
     if (tags) {
       where.tags = { contains: tags };
     }
 
-    
     if (search) {
       where.OR = [
         { name: { contains: search } },
@@ -333,10 +441,8 @@ app.get('/api/dishes', async (req, res) => {
       ];
     }
 
-    
     let orderBy = { name: 'asc' };
     if (sortBy === 'votes_desc') {
-      
       const dishesWithCounts = await prisma.dish.findMany({
         where,
         select: {
@@ -397,7 +503,6 @@ app.get('/api/dishes', async (req, res) => {
         pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / parseInt(limit)) }
       });
     } else {
-      
       const dishes = await prisma.dish.findMany({
         where,
         select: {
@@ -435,15 +540,13 @@ app.get('/api/dishes', async (req, res) => {
             _count: { votes: 0, comments: 0 },
             createdAt: new Date()
           };
-         
           const { instructions, ingredients, ...cleanDish } = dish;
           return { ...cleanDish, recipes: [defaultRecipe] };
         } else {
-         
           const { instructions, ingredients, ...cleanDish } = dish;
           return { ...cleanDish, recipes: dish.recipes };
         }
-      }).sort((a, b) => a.name.trim().localeCompare(b.name.trim())); 
+      }).sort((a, b) => a.name.trim().localeCompare(b.name.trim()));
 
       const total = await prisma.dish.count({ where });
       res.json({
@@ -455,7 +558,6 @@ app.get('/api/dishes', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 app.get('/api/recipes', async (req, res) => {
   try {
@@ -500,7 +602,6 @@ app.get('/api/recipes', async (req, res) => {
   }
 });
 
-
 app.get('/api/recipes/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -522,7 +623,6 @@ app.get('/api/recipes/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 app.post('/api/recipes', authMiddleware, async (req, res) => {
   try {
@@ -550,7 +650,6 @@ app.post('/api/recipes', authMiddleware, async (req, res) => {
   }
 });
 
-
 app.put('/api/recipes/:id', authMiddleware, async (req, res, next) => {
   const canAccess = await canAccessResource(req, res, 'recipe', req.params.id);
   if (canAccess !== true) return;  
@@ -575,7 +674,6 @@ app.put('/api/recipes/:id', authMiddleware, async (req, res, next) => {
   }
 });
 
-
 app.delete('/api/recipes/:id', authMiddleware, async (req, res, next) => {
   const canAccess = await canAccessResource(req, res, 'recipe', req.params.id);
   if (canAccess !== true) return;
@@ -592,7 +690,6 @@ app.delete('/api/recipes/:id', authMiddleware, async (req, res, next) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 app.post('/api/votes', authMiddleware, async (req, res) => {
   try {
@@ -616,7 +713,6 @@ app.post('/api/votes', authMiddleware, async (req, res) => {
   }
 });
 
-
 app.post('/api/comments', authMiddleware, async (req, res) => {
   try {
     const { error } = commentSchema.validate(req.body);
@@ -634,7 +730,6 @@ app.post('/api/comments', authMiddleware, async (req, res) => {
   }
 });
 
-
 app.get('/api/recipes/:id/comments', async (req, res) => {
   try {
     const { id } = req.params;
@@ -648,7 +743,6 @@ app.get('/api/recipes/:id/comments', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 app.delete('/api/comments/:id', authMiddleware, async (req, res, next) => {
   const canAccess = await canAccessResource(req, res, 'comment', req.params.id);
@@ -665,7 +759,6 @@ app.delete('/api/comments/:id', authMiddleware, async (req, res, next) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 app.delete('/api/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -689,7 +782,7 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });

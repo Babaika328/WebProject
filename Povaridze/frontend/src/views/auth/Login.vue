@@ -27,7 +27,9 @@
       <button @click="login" :disabled="loading" class="auth-btn primary">
         {{ loading ? 'Logging in...' : 'Login' }}
       </button>
-
+      <p class="text-center mt-4">
+  <router-link to="/forgot-password" class="text-primary font-bold hover:underline">Forgot Password?</router-link>
+      </p>
       <p class="text-center mt-6">
         No account? 
         <router-link to="/signup" class="text-primary font-bold hover:underline">Sign Up</router-link>

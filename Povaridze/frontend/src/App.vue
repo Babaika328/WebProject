@@ -9,14 +9,25 @@
       <div v-if="user" class="user-menu-wrapper"
            @mouseenter="showDropdown = true"
            @mouseleave="showDropdown = false">
-        
-        <div class="avatar">
-          {{ user.username[0].toUpperCase() }}
+
+        <div class="avatar cursor-pointer">
+          <img v-if="user.profilePicture" 
+               :src="avatarUrl" 
+               class="w-full h-full rounded-full object-cover" 
+               alt="Avatar" />
+          <span v-else>
+            {{ user.username?.[0]?.toUpperCase() || '?' }}
+          </span>
         </div>
 
         <transition name="fade">
           <div v-if="showDropdown" class="dropdown">
-            <div class="dropdown-item username">{{ user.username }}</div>
+            <div class="dropdown-item username font-bold text-lg">
+              {{ user.username }}
+            </div>
+            <router-link to="/profile" class="dropdown-item font-bold">
+              Profile
+            </router-link>
             <button @click="confirmLogout = true" class="dropdown-item logout-btn">
               Sign Out
             </button>
@@ -50,25 +61,37 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
 
 const router = useRouter()
+
 const user = ref(null)
+const avatarVersion = ref(0)
 const showDropdown = ref(false)
 const confirmLogout = ref(false)
 
-const checkAuth = () => {
+const avatarUrl = computed(() => {
+  if (!user.value?.profilePicture) return ''
+  return `http://localhost:5000/avatars/${user.value.profilePicture}?t=${avatarVersion.value}`
+})
+
+const fetchUser = async () => {
   const token = localStorage.getItem('token')
-  if (token) {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
-      user.value = { username: payload.username || 'User' }
-    } catch {
-      localStorage.removeItem('token')
-      user.value = null
-    }
-  } else {
+  if (!token) {
+    user.value = null
+    return
+  }
+
+  try {
+    const { data } = await axios.get('http://localhost:5000/api/me', {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    user.value = data
+  } catch (err) {
+    console.error('Failed to fetch user:', err)
+    localStorage.removeItem('token')
     user.value = null
   }
 }
@@ -81,18 +104,25 @@ const logout = () => {
   router.push('/')
 }
 
-onMounted(() => {
-  checkAuth()
-  window.addEventListener('storage', checkAuth)
-  router.afterEach(checkAuth)
+window.refreshUserProfile = () => {
+  avatarVersion.value += 1
+  fetchUser()
+}
+
+onMounted(fetchUser)
+
+watch(() => localStorage.getItem('token'), (newToken) => {
+  if (newToken) fetchUser()
+  else user.value = null
 })
+
+window.addEventListener('focus', fetchUser)
 </script>
 
 <style scoped>
 .header {
   @apply fixed top-0 left-0 w-full h-24 bg-white shadow-md z-50 flex items-center justify-between px-10 border-b border-gray-200;
 }
-
 .header-left { @apply flex items-center gap-10; }
 .logo { @apply h-20 w-auto; }
 .header-title { @apply text-5xl font-bold text-primary; }
@@ -104,30 +134,21 @@ onMounted(() => {
 .login { @apply bg-gray-100 text-gray-800 hover:bg-gray-200; }
 .signup { @apply bg-primary text-white hover:bg-red-700; }
 
-.user-menu-wrapper {
-  @apply relative;
-}
-
+.user-menu-wrapper { @apply relative; }
 .avatar {
   @apply w-14 h-14 bg-primary text-white rounded-full flex items-center justify-center text-2xl font-bold cursor-pointer shadow-xl hover:bg-red-700 transition-all;
 }
-
 .dropdown {
   @apply absolute top-full right-0 mt-0 bg-white rounded-2xl shadow-2xl py-4 min-w-48 border border-gray-200 z-50;
 }
-
 .dropdown-item {
   @apply px-6 py-3 text-left hover:bg-gray-50 transition w-full text-left;
 }
 .username { @apply text-gray-800 font-medium; }
 .logout-btn { @apply text-red-600 font-bold hover:bg-red-50; }
 
-.modal-overlay {
-  @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50;
-}
-.modal {
-  @apply bg-white rounded-3xl p-10 max-w-sm w-full text-center shadow-2xl;
-}
+.modal-overlay { @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50; }
+.modal { @apply bg-white rounded-3xl p-10 max-w-sm w-full text-center shadow-2xl; }
 .modal-title { @apply text-2xl font-bold text-primary mb-4; }
 .modal-text { @apply text-gray-700 mb-8; }
 .modal-buttons { @apply flex gap-4 justify-center; }
@@ -136,7 +157,6 @@ onMounted(() => {
 
 .fade-enter-active, .fade-leave-active { @apply transition-all duration-300; }
 .fade-enter-from, .fade-leave-to { @apply opacity-0 transform translate-y-4; }
-
 .modal-enter-active, .modal-leave-active { @apply transition-all duration-300; }
 .modal-enter-from, .modal-leave-to { @apply opacity-0 transform scale-90; }
 
