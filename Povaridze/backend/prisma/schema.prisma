@@ -38,6 +38,7 @@ model User {
   recipes  Recipe[]
   votes    Vote[]
   comments Comment[]
+  pendingEmailChange PendingEmailChange?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -81,6 +82,21 @@ model Comment {
   user      User   @relation(fields: [userId], references: [id])
 
   createdAt DateTime @default(now())
+}
+
+model PendingEmailChange {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  newEmail  String
+  code      String
+  attempts  Int      @default(3)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId]) 
+  @@index([expiresAt])
 }
 
 enum Role {

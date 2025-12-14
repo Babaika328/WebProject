@@ -60,8 +60,8 @@
           ref="usernameInput"
           v-model="form.username"
           :disabled="!editing.username"
-          @blur="handleBlur('username', $event)"
-          class="auth-input text-xl pr-16"
+          class="auth-input text-xl pr-16 transition-all duration-300"
+          :class="usernamePending ? 'border-green-500 border-dashed animate-pulse' : ''"
           placeholder="Username"
           required
         />
@@ -77,7 +77,6 @@
           ref="emailInput"
           v-model="form.email"
           :disabled="!editing.email"
-          @blur="handleBlur('email', $event)"
           type="email"
           class="auth-input text-xl pr-16"
           placeholder="Email"
@@ -89,27 +88,66 @@
           </svg>
         </button>
         <small v-if="editing.email" class="text-orange-600 block mt-2 text-sm">
-          Email change requires verification (admin only for now)
+          Changing email requires verification code sent to the new address
         </small>
+      </div>
+
+      <div v-if="emailVerificationVisible" class="mb-8">
+        <p class="text-center text-gray-700 mb-2">Enter the 6-digit code sent to</p>
+        <p class="text-center font-bold text-xl mb-4">{{ pendingEmail }}</p>
+
+        <p class="text-2xl font-bold text-primary mb-4">Time left: {{ formattedTimer }}</p>
+
+        <p class="text-xl mb-6">
+          <span :class="{ 'text-red-600': attemptsLeft < 2, 'text-orange-600': attemptsLeft === 2, 'text-green-600': attemptsLeft === 3 }">
+            <strong>{{ attemptsLeft }}</strong> attempt{{ attemptsLeft === 1 ? '' : 's' }} left
+          </span>
+        </p>
+
+        <p class="text-sm text-orange-600 font-medium mb-6">Check your spam folder!</p>
+
+        <div class="code-inputs">
+          <input v-for="n in 6" :key="n" v-model="emailCodeDigits[n-1]" type="text" maxlength="1" class="code-box"
+            @input="handleEmailCodeInput($event, n-1)" @keydown="handleEmailCodeKeydown($event, n-1)" ref="emailCodeInputs" />
+        </div>
+
+        <p v-if="emailCodeError" class="error-text text-center mt-4">{{ emailCodeError }}</p>
+
+        <div class="mt-6">
+          <button @click="resendCode" class="auth-btn secondary w-full" :disabled="requestingEmailChange">
+            {{ requestingEmailChange ? 'Sending...' : 'Resend Code' }}
+          </button>
+        </div>
       </div>
 
       <p v-if="profileError" class="error-text text-center mb-4">{{ profileError }}</p>
       <p v-if="profileSuccess" class="text-green-600 font-bold text-xl text-center mb-6">{{ profileSuccess }}</p>
+      <p v-if="emailChangeSuccess" class="text-green-600 font-bold text-xl text-center mb-6">{{ emailChangeSuccess }}</p>
 
-      <button
-        @click="updateProfile"
-        :disabled="saving || !hasUnsavedChanges"
-        class="auth-btn primary w-full text-xl py-5 mb-12"
-      >
-        {{ saving ? 'Saving...' : 'Save Changes' }}
-      </button>
+      <div class="flex gap-4 mb-12">
+        <button
+          @click="updateProfile"
+          :disabled="saving || (!usernamePending && !pendingAvatarBlob)"
+          class="auth-btn primary flex-1 text-xl py-5"
+        >
+          {{ saving ? 'Saving...' : 'Save Username & Avatar' }}
+        </button>
+
+        <button
+          v-if="form.email !== original.email"
+          @click="requestEmailChange"
+          :disabled="requestingEmailChange"
+          class="auth-btn primary flex-1 text-xl py-5"
+        >
+          {{ requestingEmailChange ? 'Sending code...' : 'Change Email' }}
+        </button>
+      </div>
 
       <hr class="my-12 border-gray-300">
 
       <h3 class="text-3xl font-bold text-primary text-center mb-8">Change Password</h3>
 
       <form @submit.prevent="changePassword" class="space-y-8">
-
         <div class="password-wrapper">
           <input v-model="pass.current" :type="showCurrent ? 'text' : 'password'" placeholder="Current password" class="auth-input text-xl" required />
           <button type="button" @click="showCurrent = !showCurrent" class="eye-btn">
@@ -177,15 +215,30 @@
         </button>
       </form>
     </div>
+
+    <transition name="modal">
+      <div v-if="confirmLeave" class="modal-overlay" @click.self="stay">
+        <div class="modal">
+          <h3 class="modal-title">You have unsaved changes</h3>
+          <p class="modal-text">Are you sure you want to leave without saving?</p>
+          <div class="modal-buttons">
+            <button @click="forceLeave" class="btn-danger">Leave</button>
+            <button @click="stay" class="btn-cancel">Stay</button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, onBeforeUnmount, watch } from 'vue'
 import { Cropper, CircleStencil } from 'vue-advanced-cropper'
 import 'vue-advanced-cropper/dist/style.css'
 import axios from 'axios'
+import { useRouter } from 'vue-router'
 
+const router = useRouter()
 const API_BASE = 'http://localhost:5000/api'
 
 const user = ref({})
@@ -196,6 +249,16 @@ const editing = ref({ username: false, email: false })
 const pendingAvatarBlob = ref(null)
 const pendingAvatarUrl = ref('')
 const croppedCanvas = ref(null)
+
+const requestingEmailChange = ref(false)
+const emailVerificationVisible = ref(false)
+const pendingEmail = ref('')
+const emailCodeDigits = ref(['', '', '', '', '', ''])
+const emailCodeError = ref('')
+const emailChangeSuccess = ref('')
+const attemptsLeft = ref(3)
+const timer = ref(300)
+let timerInterval = null
 
 const pass = ref({ current: '', new: '', confirm: '' })
 const showCurrent = ref(false)
@@ -213,26 +276,39 @@ const cropperVisible = ref(false)
 const previewUrl = ref('')
 const avatarVersion = ref(0)
 
+const confirmLeave = ref(false)
+
 const avatarUrl = computed(() => {
-  if (!user.value.profilePicture) return ''
+  if (!user.value?.profilePicture) return ''
   return `http://localhost:5000/avatars/${user.value.profilePicture}?t=${avatarVersion.value}`
 })
 
+const usernamePending = computed(() => form.value.username.trim() !== original.value.username)
+
 const hasUnsavedChanges = computed(() => {
   return (
-    form.value.username !== original.value.username ||
+    usernamePending.value ||
+    pendingAvatarBlob.value !== null ||
     form.value.email !== original.value.email ||
-    pendingAvatarBlob.value !== null
+    emailVerificationVisible.value
   )
+})
+
+const emailCode = computed(() => emailCodeDigits.value.join(''))
+
+const formattedTimer = computed(() => {
+  const m = String(Math.floor(timer.value / 60)).padStart(2, '0')
+  const s = String(timer.value % 60).padStart(2, '0')
+  return `${m}:${s}`
 })
 
 const hasUppercase = computed(() => /[A-Z]/.test(pass.value.new))
 const hasNumber = computed(() => /\d/.test(pass.value.new))
 const hasSpecial = computed(() => /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pass.value.new))
 const passwordsMatch = computed(() => pass.value.new === pass.value.confirm && pass.value.new !== '')
-const isPasswordValid = computed(() => {
-  return pass.value.new.length >= 8 && hasUppercase.value && hasNumber.value && hasSpecial.value && passwordsMatch.value
-})
+const isPasswordValid = computed(() =>
+  pass.value.new.length >= 8 && hasUppercase.value && hasNumber.value && hasSpecial.value && passwordsMatch.value
+)
 
 const onFileSelect = (e) => {
   const file = e.target.files[0]
@@ -264,13 +340,8 @@ const fetchUser = async () => {
       headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
     })
     user.value = data
-    original.value = {
-      username: data.username,
-      email: data.email,
-      profilePicture: data.profilePicture || ''
-    }
+    original.value = { username: data.username, email: data.email, profilePicture: data.profilePicture || '' }
     form.value = { username: data.username, email: data.email }
-    profileError.value = ''
   } catch (err) {
     profileError.value = 'Failed to load profile'
   }
@@ -285,22 +356,18 @@ const toggleEdit = async (field) => {
   }
 }
 
-const handleBlur = (field, event) => {
-  const related = event.relatedTarget
-  if (related && related.tagName === 'BUTTON' && related.textContent.includes('Save')) return
-  editing.value[field] = false
-  form.value[field] = original.value[field]
-}
-
 const updateProfile = async () => {
   profileError.value = ''
   profileSuccess.value = ''
   saving.value = true
 
   const formData = new FormData()
-  if (form.value.username !== original.value.username) formData.append('username', form.value.username.trim())
-  if (form.value.email !== original.value.email) formData.append('email', form.value.email.trim())
-  if (pendingAvatarBlob.value) formData.append('profilePicture', pendingAvatarBlob.value, 'avatar.jpg')
+  if (usernamePending.value) {
+    formData.append('username', form.value.username.trim())
+  }
+  if (pendingAvatarBlob.value) {
+    formData.append('profilePicture', pendingAvatarBlob.value, 'avatar.jpg')
+  }
 
   try {
     const res = await axios.put(`${API_BASE}/me`, formData, {
@@ -312,27 +379,164 @@ const updateProfile = async () => {
 
     if (res.data.token) localStorage.setItem('token', res.data.token)
 
-    original.value.username = form.value.username
-    original.value.email = form.value.email
-    if (res.data.user?.profilePicture) original.value.profilePicture = res.data.user.profilePicture
+    original.value.username = form.value.username.trim()
+    if (res.data.user?.profilePicture) {
+      original.value.profilePicture = res.data.user.profilePicture
+    }
 
     pendingAvatarBlob.value = null
     pendingAvatarUrl.value = ''
     avatarVersion.value++
 
     await fetchUser()
-    editing.value = { username: false, email: false }
-
     window.refreshUserProfile?.()
 
+    editing.value.username = false
     profileSuccess.value = 'Profile updated successfully!'
-    setTimeout(() => profileSuccess.value = '', 2000)
+    setTimeout(() => profileSuccess.value = '', 3000)
   } catch (err) {
     profileError.value = err.response?.data?.error || 'Failed to update profile'
   } finally {
     saving.value = false
   }
 }
+
+const requestEmailChange = async () => {
+  profileError.value = ''
+  emailChangeSuccess.value = ''
+  requestingEmailChange.value = true
+
+  try {
+    await axios.post(`${API_BASE}/me/request-email-change`, {
+      newEmail: form.value.email.trim()
+    }, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+
+    pendingEmail.value = form.value.email.trim()
+    emailVerificationVisible.value = true
+    attemptsLeft.value = 3
+    timer.value = 300
+    emailCodeDigits.value = ['', '', '', '', '', '']
+    emailCodeError.value = ''
+
+    startTimer()
+    emailChangeSuccess.value = 'Verification code sent!'
+    setTimeout(() => emailChangeSuccess.value = '', 6000)
+    nextTick(() => emailCodeInputs.value[0]?.focus())
+  } catch (err) {
+    profileError.value = err.response?.data?.error || 'Failed to send code'
+  } finally {
+    requestingEmailChange.value = false
+  }
+}
+
+const resendCode = async () => {
+  await requestEmailChange()
+}
+
+const verifyEmailChange = async (code) => {
+  emailCodeError.value = ''
+
+  try {
+    const res = await axios.post(`${API_BASE}/me/verify-email-change`, { code }, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+
+    if (res.data.token) localStorage.setItem('token', res.data.token)
+
+    await fetchUser()
+    window.refreshUserProfile?.()
+    stopTimer()
+    emailVerificationVisible.value = false
+    profileSuccess.value = 'Email changed successfully!'
+    setTimeout(() => profileSuccess.value = '', 4000)
+  } catch (err) {
+    const msg = err.response?.data?.error || 'Invalid code'
+
+    if (msg.includes('No attempts left') || msg.includes('No email change request')) {
+      emailVerificationVisible.value = false
+      stopTimer()
+      emailCodeError.value = 'Verification failed. Please try again.'
+      setTimeout(() => emailCodeError.value = '', 5000)
+      return
+    }
+
+    const match = msg.match(/(\d+) attempt/)
+    if (match) attemptsLeft.value = parseInt(match[1])
+
+    emailCodeError.value = msg
+    emailCodeDigits.value = ['', '', '', '', '', '']
+    nextTick(() => emailCodeInputs.value[0]?.focus())
+  }
+}
+
+const startTimer = () => {
+  stopTimer()
+  timerInterval = setInterval(() => {
+    if (timer.value > 0) {
+      timer.value--
+    } else {
+      stopTimer()
+      emailVerificationVisible.value = false
+      emailCodeError.value = 'Code expired. Please request a new one.'
+      setTimeout(() => emailCodeError.value = '', 5000)
+    }
+  }, 1000)
+}
+
+const stopTimer = () => {
+  if (timerInterval) clearInterval(timerInterval)
+  timerInterval = null
+}
+
+watch(emailCode, (newCode) => {
+  if (newCode.length === 6 && emailVerificationVisible.value) {
+    verifyEmailChange(newCode)
+  }
+})
+
+const handleEmailCodeInput = (e, index) => {
+  let value = e.target.value.replace(/[^0-9]/g, '')
+  if (value.length > 1) value = value[0]
+  emailCodeDigits.value[index] = value
+  if (value && index < 5) nextTick(() => emailCodeInputs.value[index + 1]?.focus())
+}
+
+const handleEmailCodeKeydown = (e, index) => {
+  if (e.key === 'Backspace' && !emailCodeDigits.value[index] && index > 0) {
+    nextTick(() => emailCodeInputs.value[index - 1]?.focus())
+  }
+}
+
+const setupRouterGuard = () => {
+  router.beforeEach((to, from, next) => {
+    if (hasUnsavedChanges.value && to.path !== from.path) {
+      confirmLeave.value = true
+      next(false)
+    } else {
+      next()
+    }
+  })
+}
+
+const forceLeave = () => {
+  confirmLeave.value = false
+  window.location.href = 'http://localhost:5173/'
+}
+
+const stay = () => {
+  confirmLeave.value = false
+}
+
+onMounted(() => {
+  fetchUser()
+  setupRouterGuard()
+})
+
+onBeforeUnmount(() => {
+  stopTimer()
+})
 
 const changePassword = async () => {
   passwordError.value = ''
@@ -365,8 +569,7 @@ const changePassword = async () => {
 
 const usernameInput = ref(null)
 const emailInput = ref(null)
-
-onMounted(fetchUser)
+const emailCodeInputs = ref([])
 </script>
 
 <style scoped>
@@ -381,4 +584,13 @@ onMounted(fetchUser)
 .eye-btn { @apply absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-primary transition-colors; }
 .eye-icon { @apply w-7 h-7; }
 .error-text { @apply text-red-600 font-bold text-xl; }
+.code-inputs { @apply flex justify-center gap-4 my-8; }
+.code-box { @apply w-14 h-14 text-center text-3xl font-bold rounded-xl border-2 border-gray-300 focus:border-primary focus:outline-none transition-all; }
+.modal-overlay { @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50; }
+.modal { @apply bg-white rounded-3xl p-10 max-w-sm w-full text-center shadow-2xl; }
+.modal-title { @apply text-2xl font-bold text-primary mb-4; }
+.modal-text { @apply text-gray-700 mb-8; }
+.modal-buttons { @apply flex gap-4 justify-center; }
+.btn-danger { @apply bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg; }
+.btn-cancel { @apply bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 px-8 rounded-xl shadow-lg; }
 </style>

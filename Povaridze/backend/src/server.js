@@ -131,8 +131,115 @@ const canAccessResource = async (req, res, resourceType, resourceId) => {
   return true;
 };
 
-const verificationCodes = new Map();
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+
+app.post('/api/me/request-email-change', authMiddleware, async (req, res) => {
+  const { newEmail } = req.body;
+  if (!newEmail) return res.status(400).json({ error: 'New email is required' });
+
+  const trimmed = newEmail.trim().toLowerCase();
+
+  const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (trimmed === currentUser.email) {
+    return res.status(400).json({ error: 'New email must be different from current' });
+  }
+
+  const existing = await prisma.user.findUnique({ where: { email: trimmed } });
+  if (existing) return res.status(400).json({ error: 'This email is already taken' });
+
+  const code = generateCode();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+  await prisma.pendingEmailChange.deleteMany({ where: { userId: req.user.id } });
+
+  await prisma.pendingEmailChange.create({
+    data: {
+      userId: req.user.id,
+      newEmail: trimmed,
+      code,
+      expiresAt,
+      attempts: 3
+    }
+  });
+
+  const html = `
+  <div style="font-family: Arial, sans-serif; text-align: center; padding: 40px; background: #f5f7fa; max-width: 520px; margin: auto; border-radius: 16px;">
+    <img src="https://i.imgur.com/2EnxFDX.jpeg" alt="Povaridze Logo" width="120" style="margin-bottom: 20px;" />
+    <h1 style="color: #e74c3c;">Email Change Verification</h1>
+    <p>You requested to change your email to <strong>${trimmed}</strong></p>
+    <div style="margin: 25px 0;">
+      <span style="font-size: 42px; letter-spacing: 10px; background: #ffffff; padding: 20px 35px; border-radius: 12px; display: inline-block; color: #27ae60; font-weight: bold; border: 1px solid #e0e0e0;">
+        ${code}
+      </span>
+    </div>
+    <p style="font-size: 14px; color: #666;">The code is valid for <strong>5 minutes</strong>.</p>
+    <p style="font-size: 14px; color: #e74c3c; font-weight: bold;">You have <strong>3 attempts</strong> to enter the code.</p>
+    <p style="font-size: 13px; color: #888; margin-top: 20px;">If you didn't request this, ignore this email.</p>
+  </div>
+  `;
+
+  try {
+    await sendEmail(trimmed, 'Verify Email Change - Povaridze', html);
+    res.json({ message: 'Verification code sent to new email' });
+  } catch (err) {
+    console.error('Email send error:', err);
+    res.status(500).json({ error: 'Failed to send verification code' });
+  }
+});
+
+app.post('/api/me/verify-email-change', authMiddleware, async (req, res) => {
+  const { code } = req.body;
+  if (!code || code.length !== 6) return res.status(400).json({ error: 'Invalid code format' });
+
+  const pending = await prisma.pendingEmailChange.findUnique({
+    where: { userId: req.user.id }
+  });
+
+  if (!pending) {
+    return res.status(400).json({ error: 'No email change request found. Please request a new code.' });
+  }
+
+  if (new Date() > pending.expiresAt) {
+    await prisma.pendingEmailChange.delete({ where: { userId: req.user.id } });
+    return res.status(400).json({ error: 'Code has expired. Please request a new one.' });
+  }
+
+  if (pending.code !== code) {
+    const updated = await prisma.pendingEmailChange.update({
+      where: { userId: req.user.id },
+      data: { attempts: { decrement: 1 } }
+    });
+
+    if (updated.attempts <= 0) {
+      await prisma.pendingEmailChange.delete({ where: { userId: req.user.id } });
+      return res.status(400).json({ error: 'No attempts left. Please request a new code.' });
+    }
+
+    return res.status(400).json({ 
+      error: `Invalid code. ${updated.attempts} attempt${updated.attempts === 1 ? '' : 's'} left.` 
+    });
+  }
+
+  const updatedUser = await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: req.user.id },
+      data: { email: pending.newEmail }
+    });
+    await tx.pendingEmailChange.delete({ where: { userId: req.user.id } });
+    return await tx.user.findUnique({ where: { id: req.user.id } });
+  });
+
+  const newToken = createToken(updatedUser);
+
+  res.json({ 
+    message: 'Email successfully changed', 
+    token: newToken 
+  });
+});
+
+
+const verificationCodes = new Map();
 
 app.post('/api/auth/send-code', async (req, res) => {
   const { email } = req.body;
@@ -252,7 +359,6 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-
 app.get('/api/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -267,56 +373,47 @@ app.get('/api/me', authMiddleware, async (req, res) => {
 
 app.put('/api/me', authMiddleware, upload.single('profilePicture'), async (req, res) => {
   try {
-    const current = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: { username: true, email: true, profilePicture: true, role: true }
-    });
+    const { username } = req.body;
+    const profilePicture = req.file?.filename;
 
-    const updateData = {};
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
 
-    if (req.body.username) {
-      const newUsername = req.body.username.trim().toLowerCase();
-      if (newUsername !== current.username) {
-        const exists = await prisma.user.findUnique({ where: { username: newUsername } });
-        if (exists) return res.status(400).json({ error: 'Username taken' });
-        updateData.username = newUsername;
+    let updateData = {};
+    let newToken = null;
+
+    if (username && username.trim() !== user.username) {
+      const existing = await prisma.user.findUnique({ where: { username: username.trim().toLowerCase() } });
+      if (existing && existing.id !== user.id) {
+        return res.status(400).json({ error: 'Username already taken' });
       }
+      updateData.username = username.trim().toLowerCase();
+      newToken = createToken({ ...req.user, username: updateData.username });
     }
 
-    if (req.body.email && req.body.email !== current.email) {
-      if (current.role !== 'ADMIN') {
-        return res.status(403).json({ error: 'Email change requires verification' });
-      }
-      updateData.email = req.body.email;
-    }
-
-    if (req.file) {
-      if (current.profilePicture) {
-        const oldPath = path.join(__dirname, '..', 'data/avatars', current.profilePicture);
+    if (profilePicture) {
+      if (user.profilePicture) {
+        const oldPath = path.join(__dirname, '..', 'data/avatars', user.profilePicture);
         await fs.unlink(oldPath).catch(() => {});
       }
-      updateData.profilePicture = req.file.filename;
+      updateData.profilePicture = profilePicture;
     }
 
-    if (Object.keys(updateData).length === 0) {
-      return res.json({ id: req.user.id, ...current });
+    if (Object.keys(updateData).length > 0) {
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: updateData
+      });
     }
 
-    const updated = await prisma.user.update({
-      where: { id: req.user.id },
-      data: updateData,
-      select: { id: true, username: true, email: true, profilePicture: true, role: true }
+    res.json({
+      message: 'Profile updated successfully',
+      token: newToken || undefined,
+      user: { profilePicture: profilePicture || user.profilePicture }
     });
 
-    if (updateData.username) {
-      const newToken = createToken(updated);
-      return res.json({ user: updated, token: newToken });
-    }
-
-    res.json(updated);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Update failed' });
+    res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 
@@ -370,7 +467,6 @@ app.post('/api/auth/reset-password', async (req, res) => {
   verificationCodes.delete(email.toLowerCase());
   res.json({ message: 'Password reset successful' });
 });
-
 
 app.get('/api/dishes/:idMeal', async (req, res) => {
   try {

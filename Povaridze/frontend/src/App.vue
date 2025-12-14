@@ -10,7 +10,7 @@
            @mouseenter="showDropdown = true"
            @mouseleave="showDropdown = false">
 
-        <div class="avatar cursor-pointer">
+        <div class="avatar">
           <img v-if="user.profilePicture" 
                :src="avatarUrl" 
                class="w-full h-full rounded-full object-cover" 
@@ -25,9 +25,9 @@
             <div class="dropdown-item username font-bold text-lg">
               {{ user.username }}
             </div>
-            <router-link to="/profile" class="dropdown-item font-bold">
+            <div @click="router.push('/profile')" class="dropdown-item font-bold cursor-pointer">
               Profile
-            </router-link>
+            </div>
             <button @click="confirmLogout = true" class="dropdown-item logout-btn">
               Sign Out
             </button>
@@ -142,7 +142,7 @@ window.addEventListener('focus', fetchUser)
   @apply absolute top-full right-0 mt-0 bg-white rounded-2xl shadow-2xl py-4 min-w-48 border border-gray-200 z-50;
 }
 .dropdown-item {
-  @apply px-6 py-3 text-left hover:bg-gray-50 transition w-full text-left;
+  @apply px-6 py-3 text-left hover:bg-gray-50 transition w-full;
 }
 .username { @apply text-gray-800 font-medium; }
 .logout-btn { @apply text-red-600 font-bold hover:bg-red-50; }
