@@ -28,6 +28,9 @@
             <div @click="router.push('/profile')" class="dropdown-item font-bold cursor-pointer">
               Profile
             </div>
+            <div v-if="user.role === 'ADMIN' || user.role === 'SUPERADMIN'"  @click="router.push('/admin')" class="dropdown-item font-bold text-primary cursor-pointer">
+              Admin
+            </div>
             <button @click="confirmLogout = true" class="dropdown-item logout-btn">
               Sign Out
             </button>

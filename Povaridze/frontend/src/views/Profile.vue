@@ -214,20 +214,45 @@
           {{ changing ? 'Changing...' : 'Change Password' }}
         </button>
       </form>
-    </div>
 
-    <transition name="modal">
-      <div v-if="confirmLeave" class="modal-overlay" @click.self="stay">
-        <div class="modal">
-          <h3 class="modal-title">You have unsaved changes</h3>
-          <p class="modal-text">Are you sure you want to leave without saving?</p>
-          <div class="modal-buttons">
-            <button @click="forceLeave" class="btn-danger">Leave</button>
-            <button @click="stay" class="btn-cancel">Stay</button>
+      <div class="mt-16 text-center">
+        <button @click="showDeleteModal = true" class="text-red-600 font-bold text-xl hover:text-red-800 transition">
+          Delete My Account
+        </button>
+      </div>
+
+      <transition name="modal">
+        <div v-if="showDeleteModal" class="modal-overlay" @click.self="showDeleteModal = false">
+          <div class="modal">
+            <h3 class="modal-title text-red-600">Delete Account?</h3>
+            <p class="modal-text">This action is permanent. All your data will be lost.</p>
+            <div class="mb-6">
+              <input v-model="deletePassword" type="password" placeholder="Enter your password to confirm" class="auth-input placeholder:text-base placeholder:text-gray-500" />
+            </div>
+            <p v-if="deleteError" class="error-text mb-4">{{ deleteError }}</p>
+            <div class="modal-buttons">
+              <button @click="deleteMyAccount" :disabled="deleting || !deletePassword" class="btn-danger">
+                {{ deleting ? 'Deleting...' : 'Delete Forever' }}
+              </button>
+              <button @click="showDeleteModal = false" class="btn-cancel">Cancel</button>
+            </div>
           </div>
         </div>
-      </div>
-    </transition>
+      </transition>
+
+      <transition name="modal">
+        <div v-if="confirmLeave" class="modal-overlay" @click.self="stay">
+          <div class="modal">
+            <h3 class="modal-title">You have unsaved changes</h3>
+            <p class="modal-text">Are you sure you want to leave without saving?</p>
+            <div class="modal-buttons">
+              <button @click="forceLeave" class="btn-danger">Leave</button>
+              <button @click="stay" class="btn-cancel">Stay</button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </div>
   </div>
 </template>
 
@@ -277,6 +302,11 @@ const previewUrl = ref('')
 const avatarVersion = ref(0)
 
 const confirmLeave = ref(false)
+
+const showDeleteModal = ref(false)
+const deletePassword = ref('')
+const deleteError = ref('')
+const deleting = ref(false)
 
 const avatarUrl = computed(() => {
   if (!user.value?.profilePicture) return ''
@@ -567,6 +597,28 @@ const changePassword = async () => {
   }
 }
 
+const deleteMyAccount = async () => {
+  if (!deletePassword.value) return
+
+  deleting.value = true
+  deleteError.value = ''
+
+  try {
+    await axios.post(`${API_BASE}/me/delete-account`, {
+      password: deletePassword.value
+    }, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+
+    localStorage.removeItem('token')
+    window.location.href = '/'
+  } catch (err) {
+    deleteError.value = err.response?.data?.error || 'Wrong password'
+  } finally {
+    deleting.value = false
+  }
+}
+
 const usernameInput = ref(null)
 const emailInput = ref(null)
 const emailCodeInputs = ref([])
@@ -575,7 +627,7 @@ const emailCodeInputs = ref([])
 <style scoped>
 .cropper-container { height: 420px; background: #111; border-radius: 20px; overflow: hidden; }
 .cropper { height: 100%; }
-.auth-input { @apply w-full px-6 py-5 rounded-xl border border-gray-300 focus:border-primary focus:outline-none text-xl transition; }
+.auth-input { @apply w-full px-5 py-5 rounded-xl border border-gray-300 focus:border-primary focus:outline-none text-xl transition; }
 .auth-input:disabled { @apply bg-gray-50 text-gray-600 cursor-not-allowed; }
 .auth-btn { @apply w-full py-5 rounded-xl font-bold text-xl transition-all shadow-lg hover:shadow-xl; }
 .primary { @apply bg-primary text-white hover:bg-red-700; }
