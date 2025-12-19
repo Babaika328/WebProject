@@ -1,11 +1,17 @@
 <template>
   <div class="container">
     <Filters :all-dishes="allDishes" :filters="filters" @update="updateFilters" />
+
     <div v-if="loading" class="loading">Loading...</div>
     <div v-else-if="error" class="no-results error">{{ error }}</div>
     <div v-else-if="dishes.length === 0" class="no-results">No results found</div>
     <div v-else class="dish-grid">
-      <DishCard v-for="dish in dishes" :key="dish.idMeal" :dish="dish" @click="goToDetail(dish.idMeal)" />
+      <DishCard 
+        v-for="dish in sortedDishes" 
+        :key="dish.idMeal" 
+        :dish="dish" 
+        @click="goToDetail(dish.idMeal)" 
+      />
     </div>
 
     <div v-if="pagination.pages > 1" class="pagination">
@@ -24,7 +30,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import axios from 'axios'
 import DishCard from '../components/DishCard.vue'
@@ -116,6 +122,21 @@ const getPageNumbers = () => {
   return pages
 }
 
+const sortedDishes = computed(() => {
+  let result = [...dishes.value]
+
+  if (filters.value.sortBy === 'popular') {
+    result.sort((a, b) => {
+      const getUpVotes = (dish) => 
+        dish.recipes.reduce((sum, r) => sum + (r.votes?.filter(v => v.type === 'UP').length || 0), 0)
+
+      return getUpVotes(b) - getUpVotes(a)
+    })
+  }
+
+  return result
+})
+
 watch(
   () => route.query,
   (newQuery) => {
@@ -139,7 +160,7 @@ watch(
 )
 
 onMounted(async () => {
-  await fetchDishes({}, 1, true)
+  await fetchDishes({}, 1, true) 
   await fetchDishes(filters.value, page.value)
 })
 </script>

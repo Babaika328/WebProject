@@ -2,8 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const bcrypt = require('bcryptjs');
+const { PrismaClient } = require('@prisma/client');
 
 const app = express();
+const prisma = new PrismaClient();
 
 app.use(cors({
   origin: 'http://localhost:5173',
@@ -14,19 +17,16 @@ app.use(express.json());
 
 app.use('/avatars', express.static(path.join(__dirname, '..', 'data/avatars')));
 app.use('/images', express.static(path.join(__dirname, '..', 'data/images')));
+app.use('/recipes', express.static(path.join(__dirname, '..', 'data/recipes'))); 
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/user'));
 app.use('/api/admin', require('./routes/admin'));
-app.use('/api', require('./routes/dishes'));
+app.use('/api', require('./routes/dishes')); 
 
 app.use(require('./middlewares/errorHandler'));
 
 const createPredefinedUsers = async () => {
-  const { PrismaClient } = require('@prisma/client');
-  const bcrypt = require('bcryptjs');
-  const prisma = new PrismaClient();
-
   const hashedPassword = await bcrypt.hash('wolk', 10);
 
   const users = [
@@ -71,5 +71,6 @@ app.listen(PORT, () => {
 
 process.on('SIGINT', () => {
   console.log('Shutting down gracefully...');
+  prisma.$disconnect();
   process.exit(0);
 });

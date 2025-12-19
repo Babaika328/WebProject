@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middlewares/authMiddleware');
 const { PrismaClient } = require('@prisma/client');
+const upload = require('../middlewares/uploadMiddleware');
 
 const prisma = new PrismaClient();
 
@@ -14,18 +15,16 @@ router.get('/dishes', async (req, res) => {
     if (category && category.trim() !== '') {
       where.category = category.trim();
     }
-
     if (area && area.trim() !== '') {
       where.area = area.trim();
     }
-
     if (search && search.trim() !== '') {
       const searchTerm = search.trim();
       where.OR = [
         { name: { contains: searchTerm } },
-        { category: { not: null, contains: searchTerm } },
-        { area: { not: null, contains: searchTerm } },
-        { tags: { not: null, contains: searchTerm } }
+        { category: { contains: searchTerm } },
+        { area: { contains: searchTerm } },
+        { tags: { contains: searchTerm } }
       ];
     }
 
@@ -47,6 +46,7 @@ router.get('/dishes', async (req, res) => {
           recipes: {
             include: {
               user: { select: { id: true, username: true } },
+              votes: true,
               _count: { select: { votes: true, comments: true } }
             },
             orderBy: { createdAt: 'desc' }
@@ -61,27 +61,8 @@ router.get('/dishes', async (req, res) => {
 
     const pages = Math.ceil(total / parseInt(limit));
 
-    const enrichedDishes = dishes.map(dish => {
-      let recipes = dish.recipes;
-      if (recipes.length === 0) {
-        const defaultRecipe = {
-          id: null,
-          title: `${dish.name.trim()} (Default)`,
-          instructions: dish.instructions || 'No instructions available.',
-          ingredients: dish.ingredients || 'No ingredients available.',
-          user: { id: null, username: 'System' },
-          _count: { votes: 0, comments: 0 },
-          createdAt: new Date()
-        };
-        recipes = [defaultRecipe];
-      }
-
-      const { instructions, ingredients, ...cleanDish } = dish;
-      return { ...cleanDish, recipes };
-    });
-
     res.json({
-      dishes: enrichedDishes,
+      dishes,
       pagination: {
         total,
         pages,
@@ -90,7 +71,6 @@ router.get('/dishes', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error fetching dishes:', err);
     res.status(500).json({ error: 'Failed to load dishes' });
   }
 });
@@ -114,6 +94,7 @@ router.get('/dishes/:idMeal', async (req, res) => {
         recipes: {
           include: {
             user: { select: { id: true, username: true } },
+            votes: true,
             _count: { select: { votes: true, comments: true } }
           },
           orderBy: { createdAt: 'desc' }
@@ -121,28 +102,10 @@ router.get('/dishes/:idMeal', async (req, res) => {
       }
     });
 
-    if (!dish) {
-      return res.status(404).json({ error: 'Dish not found' });
-    }
+    if (!dish) return res.status(404).json({ error: 'Dish not found' });
 
-    let recipes = dish.recipes;
-    if (recipes.length === 0) {
-      const defaultRecipe = {
-        id: null,
-        title: `${dish.name.trim()} (Default)`,
-        instructions: dish.instructions || 'No instructions available.',
-        ingredients: dish.ingredients || 'No ingredients available.',
-        user: { id: null, username: 'System' },
-        _count: { votes: 0, comments: 0 },
-        createdAt: new Date()
-      };
-      recipes = [defaultRecipe];
-    }
-
-    const { instructions, ingredients, ...cleanDish } = dish;
-    res.json({ ...cleanDish, recipes });
+    res.json(dish);
   } catch (err) {
-    console.error('Error fetching dish:', err);
     res.status(500).json({ error: 'Failed to load dish' });
   }
 });
@@ -155,10 +118,8 @@ router.get('/categories', async (req, res) => {
       where: { category: { not: null } },
       orderBy: { category: 'asc' }
     });
-
     res.json(categories.map(c => c.category).filter(Boolean));
   } catch (err) {
-    console.error('Error fetching categories:', err);
     res.status(500).json({ error: 'Failed to load categories' });
   }
 });
@@ -171,16 +132,14 @@ router.get('/areas', async (req, res) => {
       where: { area: { not: null } },
       orderBy: { area: 'asc' }
     });
-
     res.json(areas.map(a => a.area).filter(Boolean));
   } catch (err) {
-    console.error('Error fetching areas:', err);
     res.status(500).json({ error: 'Failed to load areas' });
   }
 });
 
-router.post('/recipes', authMiddleware, async (req, res) => {
-  const { dishId, title, instructions, ingredients } = req.body;
+router.post('/recipes', authMiddleware, upload.single('image'), async (req, res) => {
+  const { dishId, title, instructions, ingredients, youtube } = req.body;
 
   if (!dishId || !title) {
     return res.status(400).json({ error: 'dishId and title are required' });
@@ -194,15 +153,22 @@ router.post('/recipes', authMiddleware, async (req, res) => {
       data: {
         userId: req.user.id,
         dishId,
-        title,
-        instructions,
-        ingredients: JSON.stringify(ingredients || [])
+        title: title.trim(),
+        instructions: instructions?.trim() || null,
+        ingredients,
+        youtube: youtube?.trim() || null,
+        image: req.file ? req.file.filename : null
+      },
+      include: {
+        user: { select: { id: true, username: true } },
+        dish: { select: { name: true, thumb_file: true } },
+        votes: true,
+        _count: { select: { votes: true, comments: true } }
       }
     });
 
-    res.json(recipe);
+    res.status(201).json(recipe);
   } catch (err) {
-    console.error('Error creating recipe:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -230,7 +196,6 @@ router.get('/recipes', async (req, res) => {
 
     res.json(recipesWithVotes);
   } catch (err) {
-    console.error('Error fetching recipes:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -260,7 +225,6 @@ router.get('/recipes/:id', async (req, res) => {
       downvotes: recipe.votes.filter(v => v.type === 'DOWN').length
     });
   } catch (err) {
-    console.error('Error fetching recipe:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -283,7 +247,6 @@ router.post('/recipes/:id/comments', authMiddleware, async (req, res) => {
 
     res.json(comment);
   } catch (err) {
-    console.error('Error adding comment:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -309,7 +272,6 @@ router.post('/recipes/:id/vote', authMiddleware, async (req, res) => {
 
     res.json(vote);
   } catch (err) {
-    console.error('Error voting:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -324,7 +286,89 @@ router.delete('/recipes/:id/vote', authMiddleware, async (req, res) => {
 
     res.status(204).send();
   } catch (err) {
-    console.error('Error removing vote:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/recipes/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { title, instructions, ingredients } = req.body;
+
+  try {
+    const recipe = await prisma.recipe.findUnique({
+      where: { id: parseInt(id) },
+      include: { user: true }
+    });
+
+    if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
+
+    const isAuthor = recipe.userId === req.user.id;
+    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPERADMIN';
+    if (!isAuthor && !isAdmin) return res.status(403).json({ error: 'Access denied' });
+
+    const updated = await prisma.recipe.update({
+      where: { id: parseInt(id) },
+      data: {
+        title,
+        instructions,
+        ingredients: JSON.stringify(ingredients || [])
+      },
+      include: {
+        user: { select: { username: true, profilePicture: true } },
+        dish: true
+      }
+    });
+
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/recipes/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const recipe = await prisma.recipe.findUnique({
+      where: { id: parseInt(id) },
+      include: { user: true }
+    });
+
+    if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
+
+    const isAuthor = recipe.userId === req.user.id;
+    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPERADMIN';
+    if (!isAuthor && !isAdmin) return res.status(403).json({ error: 'Access denied' });
+
+    await prisma.vote.deleteMany({ where: { recipeId: parseInt(id) } });
+    await prisma.comment.deleteMany({ where: { recipeId: parseInt(id) } });
+    await prisma.recipe.delete({ where: { id: parseInt(id) } });
+
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/comments/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const comment = await prisma.comment.findUnique({
+      where: { id: parseInt(id) },
+      include: { user: true }
+    });
+
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+
+    const isAuthor = comment.userId === req.user.id;
+    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPERADMIN';
+    if (!isAuthor && !isAdmin) return res.status(403).json({ error: 'Access denied' });
+
+    await prisma.comment.delete({ where: { id: parseInt(id) } });
+
+    res.status(204).send();
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

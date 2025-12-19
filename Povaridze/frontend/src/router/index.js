@@ -21,6 +21,9 @@ const router = createRouter({
     { path: '/forgot-password', name: 'ForgotPassword', component: () => import('../views/ForgotPassword.vue')},
     { path: '/admin', name: 'Admin', component: () => import('../views/Admin.vue'), meta: { requiresAdmin: true }},
     { path: '/admin/edit/:id', name: 'AdminEditUser', component: () => import('../views/AdminEditUser.vue'), meta: { requiresAdmin: true }},
+    { path: '/add-recipe', name: 'AddRecipe', component: () => import('../views/AddRecipe.vue'), meta: { requiresAuth: true }},
+    { path: '/add-recipe/:dishId', name: 'AddRecipe', component: () => import('../views/AddRecipe.vue'), meta: { requiresAuth: true }},
+    { path: '/recipe/:id', name: 'RecipeDetail', component: () => import('../views/RecipeDetail.vue')},
   ]
 })
 
