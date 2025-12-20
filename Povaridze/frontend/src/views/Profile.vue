@@ -162,8 +162,8 @@
         </div>
 
         <div class="text-right -mt-6 mb-6">
-          <router-link to="/forgot-password?from=profile" class="text-primary hover:underline text-sm font-medium">
-            Forgot password?
+          <router-link :to="{ path: '/forgot-password', query: { from: 'profile' } }" class="text-primary font-bold hover:underline">
+              Forgot password?
           </router-link>
         </div>
 

@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,90 +11,83 @@ datasource db {
 }
 
 model Dish {
-  idMeal      String     @id @db.VarChar(20)
-  name        String     @db.VarChar(255)
-  category    String?    @db.VarChar(100)
-  area        String?    @db.VarChar(100)
-  instructions String?   @db.Text
-  ingredients String?    @db.Text
-  tags        String?    @db.VarChar(255)
-  thumb_file  String?    @db.VarChar(255)
-  youtube String? @db.VarChar(500)
-  recipes     Recipe[]
+  idMeal      String    @id @db.VarChar(20)
+  name        String    @db.VarChar(255)
+  category    String?   @db.VarChar(100)
+  area        String?   @db.VarChar(100)
+  instructions String?  @db.Text
+  ingredients  String?  @db.Text
+  tags         String?  @db.VarChar(255)
+  thumb_file   String?  @db.VarChar(255)
+  youtube      String?  @db.VarChar(500)
+  recipes      Recipe[]
 
   @@map("dishes")
 }
 
 model User {
-  id       Int      @id @default(autoincrement())
-  username String   @unique @db.VarChar(50)  
-  email    String   @unique @db.VarChar(255)
-  password String   @db.VarChar(255)
-  profilePicture  String?  @db.VarChar(255)
-  role     Role     @default(USER)
-  recipes  Recipe[]
-  votes    Vote[]
-  comments Comment[]
-  pendingEmailChange PendingEmailChange?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             Int       @id @default(autoincrement())
+  username       String    @unique @db.VarChar(50)
+  email          String    @unique @db.VarChar(255)
+  password       String    @db.VarChar(255)
+  profilePicture String?   @db.VarChar(255)
+  role           Role      @default(USER)
+  recipes        Recipe[]
+  votes          Vote[]
+  comments       Comment[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 model Recipe {
-  id            Int      @id @default(autoincrement())
-  dishId        String   @db.VarChar(20)
-  title         String   @db.VarChar(255)
-  instructions  String?  @db.Text
-  ingredients   String?  @db.Text
-  image         String?  @db.VarChar(255)  
-  youtube       String?  @db.VarChar(500)  
-  userId        Int
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           Int       @id @default(autoincrement())
+  dishId       String    @db.VarChar(20)
+  title        String    @db.VarChar(255)
+  instructions String?   @db.Text
+  ingredients  String?   @db.Text
+  image        String?   @db.VarChar(255)
+  youtube      String?   @db.VarChar(500)
+  userId       Int
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  user    User    @relation(fields: [userId], references: [id])
-  dish    Dish    @relation(fields: [dishId], references: [idMeal])
-  votes   Vote[]
+  user   User   @relation(fields: [userId], references: [id])
+  dish   Dish   @relation(fields: [dishId], references: [idMeal])
+  votes  Vote[]
   comments Comment[]
 }
 
 model Vote {
-  id        Int      @id @default(autoincrement())
-  recipeId  Int
-  userId    Int
-  type      VoteType
+  id       Int      @id @default(autoincrement())
+  recipeId Int
+  userId   Int
+  type     VoteType
 
-  recipe    Recipe @relation(fields: [recipeId], references: [id])
-  user      User   @relation(fields: [userId], references: [id])
+  recipe Recipe @relation(fields: [recipeId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
 
   @@unique([recipeId, userId])
 }
 
 model Comment {
-  id        Int      @id @default(autoincrement())
-  recipeId  Int
-  userId    Int
-  text      String   @db.Text
+  id       Int      @id @default(autoincrement())
+  recipeId Int
+  userId   Int
+  text     String   @db.Text
 
-  recipe    Recipe @relation(fields: [recipeId], references: [id])
-  user      User   @relation(fields: [userId], references: [id])
-
+  recipe Recipe @relation(fields: [recipeId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())
 }
 
 model PendingEmailChange {
   id        Int      @id @default(autoincrement())
-  userId    Int
-  newEmail  String
+  newEmail  String   @unique
   code      String
   attempts  Int      @default(3)
   expiresAt DateTime
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId]) 
   @@index([expiresAt])
 }
 
@@ -111,5 +101,3 @@ enum VoteType {
   UP
   DOWN
 }
-
-
