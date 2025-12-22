@@ -138,16 +138,54 @@ router.get('/areas', async (req, res) => {
   }
 });
 
+router.get('/me/recipes', authMiddleware, async (req, res) => {
+  try {
+    const recipes = await prisma.recipe.findMany({
+      where: { userId: req.user.id },
+      include: {
+        dish: true,
+        user: { select: { username: true, profilePicture: true } },
+        votes: true,
+        comments: {
+          include: { user: { select: { username: true, profilePicture: true } } },
+          orderBy: { createdAt: 'desc' }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const recipesWithStats = recipes.map(recipe => ({
+      ...recipe,
+      upvotes: recipe.votes.filter(v => v.type === 'UP').length,
+      downvotes: recipe.votes.filter(v => v.type === 'DOWN').length
+    }));
+
+    res.json(recipesWithStats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/recipes', authMiddleware, upload.single('image'), async (req, res) => {
   const { dishId, title, instructions, ingredients, youtube } = req.body;
-
   if (!dishId || !title) {
     return res.status(400).json({ error: 'dishId and title are required' });
   }
-
   try {
     const dish = await prisma.dish.findUnique({ where: { idMeal: dishId } });
     if (!dish) return res.status(404).json({ error: 'Dish not found' });
+
+    let ingredientsStr = '';
+    if (ingredients) {
+      if (typeof ingredients === 'string') {
+        try {
+          const arr = JSON.parse(ingredients);
+          ingredientsStr = Array.isArray(arr) ? arr.join('\n') : ingredients;
+        } catch {
+          ingredientsStr = ingredients;
+        }
+      }
+    }
 
     const recipe = await prisma.recipe.create({
       data: {
@@ -155,7 +193,7 @@ router.post('/recipes', authMiddleware, upload.single('image'), async (req, res)
         dishId,
         title: title.trim(),
         instructions: instructions?.trim() || null,
-        ingredients,
+        ingredients: ingredientsStr,
         youtube: youtube?.trim() || null,
         image: req.file ? req.file.filename : null
       },
@@ -232,7 +270,6 @@ router.get('/recipes/:id', async (req, res) => {
 router.post('/recipes/:id/comments', authMiddleware, async (req, res) => {
   const { id } = req.params;
   const { text } = req.body;
-
   if (!text) return res.status(400).json({ error: 'Text required' });
 
   try {
@@ -254,7 +291,6 @@ router.post('/recipes/:id/comments', authMiddleware, async (req, res) => {
 router.post('/recipes/:id/vote', authMiddleware, async (req, res) => {
   const { id } = req.params;
   const { type } = req.body;
-
   if (!['UP', 'DOWN'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
 
   try {
@@ -290,9 +326,9 @@ router.delete('/recipes/:id/vote', authMiddleware, async (req, res) => {
   }
 });
 
-router.put('/recipes/:id', authMiddleware, async (req, res) => {
+router.put('/recipes/:id', authMiddleware, upload.single('image'), async (req, res) => {
   const { id } = req.params;
-  const { title, instructions, ingredients } = req.body;
+  const { title, instructions, ingredients, youtube } = req.body;
 
   try {
     const recipe = await prisma.recipe.findUnique({
@@ -303,23 +339,57 @@ router.put('/recipes/:id', authMiddleware, async (req, res) => {
     if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
 
     const isAuthor = recipe.userId === req.user.id;
-    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPERADMIN';
+    const isAdmin = ['ADMIN', 'SUPERADMIN'].includes(req.user.role);
+
     if (!isAuthor && !isAdmin) return res.status(403).json({ error: 'Access denied' });
+
+    let newIngredients = recipe.ingredients || '';
+
+    if (ingredients) {
+      if (typeof ingredients === 'string') {
+        try {
+          const arr = JSON.parse(ingredients);
+          if (Array.isArray(arr)) {
+            newIngredients = arr.join('\n');
+          } else {
+            newIngredients = ingredients;
+          }
+        } catch {
+          newIngredients = ingredients;
+        }
+      }
+    }
+
+    const updateData = {
+      title: title?.trim() || recipe.title,
+      instructions: instructions?.trim() || recipe.instructions,
+      ingredients: newIngredients,
+      youtube: youtube?.trim() || recipe.youtube
+    };
+
+    if (req.file) {
+      updateData.image = req.file.filename;
+    }
 
     const updated = await prisma.recipe.update({
       where: { id: parseInt(id) },
-      data: {
-        title,
-        instructions,
-        ingredients: JSON.stringify(ingredients || [])
-      },
+      data: updateData,
       include: {
         user: { select: { username: true, profilePicture: true } },
-        dish: true
+        dish: true,
+        votes: true,
+        comments: {
+          include: { user: { select: { username: true, profilePicture: true } } },
+          orderBy: { createdAt: 'desc' }
+        }
       }
     });
 
-    res.json(updated);
+    res.json({
+      ...updated,
+      upvotes: updated.votes.filter(v => v.type === 'UP').length,
+      downvotes: updated.votes.filter(v => v.type === 'DOWN').length
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -338,6 +408,7 @@ router.delete('/recipes/:id', authMiddleware, async (req, res) => {
 
     const isAuthor = recipe.userId === req.user.id;
     const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPERADMIN';
+
     if (!isAuthor && !isAdmin) return res.status(403).json({ error: 'Access denied' });
 
     await prisma.vote.deleteMany({ where: { recipeId: parseInt(id) } });
@@ -363,6 +434,7 @@ router.delete('/comments/:id', authMiddleware, async (req, res) => {
 
     const isAuthor = comment.userId === req.user.id;
     const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPERADMIN';
+
     if (!isAuthor && !isAdmin) return res.status(403).json({ error: 'Access denied' });
 
     await prisma.comment.delete({ where: { id: parseInt(id) } });

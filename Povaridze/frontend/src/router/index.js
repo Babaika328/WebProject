@@ -24,6 +24,7 @@ const router = createRouter({
     { path: '/add-recipe', name: 'AddRecipe', component: () => import('../views/AddRecipe.vue'), meta: { requiresAuth: true }},
     { path: '/add-recipe/:dishId', name: 'AddRecipe', component: () => import('../views/AddRecipe.vue'), meta: { requiresAuth: true }},
     { path: '/recipe/:id', name: 'RecipeDetail', component: () => import('../views/RecipeDetail.vue')},
+    { path: '/my-recipes', name: 'MyRecipes', component: () => import('../views/MyRecipes.vue'), meta: { requiresAuth: true }},
   ]
 })
 

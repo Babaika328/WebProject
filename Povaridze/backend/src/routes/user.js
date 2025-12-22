@@ -89,6 +89,35 @@ router.post('/me/change-password', authMiddleware, async (req, res) => {
   }
 });
 
+router.get('/me/recipes', authMiddleware, async (req, res) => {
+  try {
+    const recipes = await prisma.recipe.findMany({
+      where: { userId: req.user.id },
+      include: {
+        dish: true,
+        user: { select: { username: true, profilePicture: true } },
+        votes: true,
+        comments: {
+          include: { user: { select: { username: true, profilePicture: true } } },
+          orderBy: { createdAt: 'desc' }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const recipesWithStats = recipes.map(recipe => ({
+      ...recipe,
+      upvotes: recipe.votes.filter(v => v.type === 'UP').length,
+      downvotes: recipe.votes.filter(v => v.type === 'DOWN').length
+    }));
+
+    res.json(recipesWithStats);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch my recipes' });
+  }
+});
+
 router.post('/me/delete-account', authMiddleware, async (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: 'Password required' });

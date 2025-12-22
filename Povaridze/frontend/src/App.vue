@@ -31,6 +31,9 @@
             <div v-if="user.role === 'ADMIN' || user.role === 'SUPERADMIN'"  @click="router.push('/admin')" class="dropdown-item font-bold text-primary cursor-pointer">
               Admin
             </div>
+            <div @click="router.push('/my-recipes')" class="dropdown-item font-bold cursor-pointer">
+              My Recipes
+            </div>
             <button @click="confirmLogout = true" class="dropdown-item logout-btn">
               Sign Out
             </button>
@@ -142,7 +145,7 @@ window.addEventListener('focus', fetchUser)
   @apply w-14 h-14 bg-primary text-white rounded-full flex items-center justify-center text-2xl font-bold cursor-pointer shadow-xl hover:bg-red-700 transition-all;
 }
 .dropdown {
-  @apply absolute top-full right-0 mt-0 bg-white rounded-2xl shadow-2xl py-4 min-w-48 border border-gray-200 z-50;
+  @apply absolute top-full right-0 mt-0 bg-white rounded-2xl shadow-2xl py-4 min-w-48 border border-gray-200;
 }
 .dropdown-item {
   @apply px-6 py-3 text-left hover:bg-gray-50 transition w-full;
