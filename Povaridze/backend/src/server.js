@@ -9,7 +9,6 @@ const sendEmail = require('../utils/sendEmail');
 
 const app = express();
 const prisma = new PrismaClient();
-
 const JWT_SECRET = process.env.JWT_SECRET || 'your_very_strong_secret_change_in_production';
 
 app.use(cors({
@@ -18,7 +17,6 @@ app.use(cors({
 }));
 
 app.use(express.json());
-
 app.use('/avatars', express.static(path.join(__dirname, '..', 'data/avatars')));
 app.use('/images', express.static(path.join(__dirname, '..', 'data/images')));
 app.use('/recipes', express.static(path.join(__dirname, '..', 'data/recipes')));
@@ -27,10 +25,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/user'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api', require('./routes/dishes'));
-
-
 app.use(require('./middlewares/errorHandler'));
-
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -39,7 +34,6 @@ app.post('/api/me/request-email-change', async (req, res) => {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'No token provided' });
   }
-
   const token = authHeader.split(' ')[1];
   let decoded;
   try {
@@ -47,27 +41,19 @@ app.post('/api/me/request-email-change', async (req, res) => {
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token' });
   }
-
   const { newEmail } = req.body;
   if (!newEmail) return res.status(400).json({ error: 'New email is required' });
-
   const trimmed = newEmail.trim().toLowerCase();
-
   const currentUser = await prisma.user.findUnique({ where: { id: decoded.id } });
   if (!currentUser) return res.status(404).json({ error: 'User not found' });
-
   if (trimmed === currentUser.email) {
     return res.status(400).json({ error: 'New email must be different from current' });
   }
-
   const existing = await prisma.user.findUnique({ where: { email: trimmed } });
   if (existing) return res.status(400).json({ error: 'This email is already taken' });
-
   const code = generateCode();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); 
-
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
   await prisma.pendingEmailChange.deleteMany({ where: { userId: currentUser.id } });
-
   await prisma.pendingEmailChange.create({
     data: {
       userId: currentUser.id,
@@ -77,7 +63,6 @@ app.post('/api/me/request-email-change', async (req, res) => {
       attempts: 3
     }
   });
-
   const html = `
   <div style="font-family: Arial, sans-serif; text-align: center; padding: 40px; background: #f5f7fa; max-width: 520px; margin: auto; border-radius: 16px;">
     <img src="https://i.imgur.com/2EnxFDX.jpeg" alt="Povaridze Logo" width="120" style="margin-bottom: 20px;" />
@@ -93,7 +78,6 @@ app.post('/api/me/request-email-change', async (req, res) => {
     <p style="font-size: 13px; color: #888; margin-top: 20px;">If you didn't request this, ignore this email.</p>
   </div>
   `;
-
   try {
     await sendEmail(trimmed, 'Verify Email Change - Povaridze', html);
     res.json({ message: 'Verification code sent to new email' });
@@ -108,7 +92,6 @@ app.post('/api/me/verify-email-change', async (req, res) => {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'No token provided' });
   }
-
   const token = authHeader.split(' ')[1];
   let decoded;
   try {
@@ -116,56 +99,57 @@ app.post('/api/me/verify-email-change', async (req, res) => {
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token' });
   }
-
   const { code } = req.body;
   if (!code || code.length !== 6) return res.status(400).json({ error: 'Invalid code format' });
-
-  const pending = await prisma.pendingEmailChange.findUnique({
+  const pending = await prisma.pendingEmailChange.findFirst({
     where: { userId: decoded.id }
   });
-
   if (!pending) {
     return res.status(400).json({ error: 'No email change request found. Please request a new code.' });
   }
-
   if (new Date() > pending.expiresAt) {
-    await prisma.pendingEmailChange.delete({ where: { userId: decoded.id } });
+    await prisma.pendingEmailChange.deleteMany({ where: { userId: decoded.id } });
     return res.status(400).json({ error: 'Code has expired. Please request a new one.' });
   }
-
   if (pending.code !== code) {
-    const updated = await prisma.pendingEmailChange.update({
+    await prisma.pendingEmailChange.updateMany({
       where: { userId: decoded.id },
       data: { attempts: { decrement: 1 } }
     });
-
-    if (updated.attempts <= 0) {
-      await prisma.pendingEmailChange.delete({ where: { userId: decoded.id } });
+    const refreshed = await prisma.pendingEmailChange.findFirst({
+      where: { userId: decoded.id }
+    });
+    if (!refreshed || refreshed.attempts <= 0) {
+      await prisma.pendingEmailChange.deleteMany({ where: { userId: decoded.id } });
       return res.status(400).json({ error: 'No attempts left. Please request a new code.' });
     }
-
     return res.status(400).json({
-      error: `Invalid code. ${updated.attempts} attempt${updated.attempts === 1 ? '' : 's'} left.`
+      error: `Invalid code. ${refreshed.attempts} attempt${refreshed.attempts === 1 ? '' : 's'} left.`
     });
   }
-
-  const updatedUser = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: decoded.id },
       data: { email: pending.newEmail }
     });
-    await tx.pendingEmailChange.delete({ where: { userId: decoded.id } });
-    return await tx.user.findUnique({ where: { id: decoded.id } });
+    await tx.pendingEmailChange.deleteMany({
+      where: { userId: decoded.id }
+    });
   });
-
+  const updatedUser = await prisma.user.findUnique({ where: { id: decoded.id } });
   const newToken = jwt.sign({ id: updatedUser.id }, JWT_SECRET, { expiresIn: '30d' });
-
   res.json({
     message: 'Email successfully changed',
-    token: newToken
+    token: newToken,
+    user: {
+      id: updatedUser.id,
+      username: updatedUser.username,
+      email: updatedUser.email,
+      role: updatedUser.role,
+      profilePicture: updatedUser.profilePicture
+    }
   });
 });
-
 
 const createPredefinedUsers = async () => {
   const hashedPassword = await bcrypt.hash('wolk', 10);
@@ -183,7 +167,6 @@ const createPredefinedUsers = async () => {
     { username: 'testuser9', email: 'test9@example.com', role: 'USER' },
     { username: 'testuser10', email: 'test10@example.com', role: 'USER' }
   ];
-
   for (const u of users) {
     const existing = await prisma.user.findUnique({ where: { email: u.email } });
     if (!existing) {
@@ -198,7 +181,6 @@ const createPredefinedUsers = async () => {
       console.log(`Created user: ${u.email} / wolk (role: ${u.role})`);
     }
   }
-
   await prisma.$disconnect();
 };
 

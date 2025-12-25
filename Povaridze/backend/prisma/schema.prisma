@@ -37,6 +37,7 @@ model User {
   comments       Comment[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  pendingEmailChanges PendingEmailChange[]
 }
 
 model Recipe {
@@ -83,12 +84,15 @@ model Comment {
 
 model PendingEmailChange {
   id        Int      @id @default(autoincrement())
+  userId Int?
+  user   User? @relation(fields: [userId], references: [id])
   newEmail  String   @unique
   code      String
   attempts  Int      @default(3)
   expiresAt DateTime
   createdAt DateTime @default(now())
 
+  @@index([userId])
   @@index([expiresAt])
 }
 
